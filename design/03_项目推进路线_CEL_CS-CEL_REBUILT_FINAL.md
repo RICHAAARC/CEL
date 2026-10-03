@@ -5,7 +5,7 @@
 > 文档职责：将01/02的方法定义落实为可实现的起步配置、实验问题、指标、统计解释及失败后的自主研究路径。
 > 状态：**方法优先 / 可迭代的研究基线**
 
-> 修订：2026-10-03，v1.4。治理、可复现、防篡改、环境与协作信息全部作为记录，不设运行或继续研究的强制准入。当前尚无研究实验结果；真实数据和可用权重只影响依赖它们的运行，小构造例、损失和模块实现可以先行。
+> 修订：2026-10-03，v1.4.1。治理、可复现、防篡改、环境与协作信息全部作为记录，不设运行或继续研究的强制准入。当前尚无研究实验结果；真实数据和可用权重只影响依赖它们的运行，小构造例、损失和模块实现可以先行。
 
 ---
 
@@ -1213,6 +1213,8 @@ R-None：
 
 Dense track：
 
+本项区分真实通信变化与reference未观察到的部分。先确定所评价的source/target物理时间范围与family目标pair集合；范围内的未知部分保留为未知，不能由reference缺失推断删除，也不能当作已经证实没有变化。以下定义同时适用于完整范围和明确声明的可观察子范围；子范围结论不外推至整个音频或family。
+
 定义 reference transported occupancy：
 
 \[
@@ -1225,67 +1227,71 @@ strict identity occupancy：
 Y_p^{id}=W_{id,p}Y_x.
 \]
 
-以 `premise.occupancy_boundary_threshold` 将occupancy field二值化，在各自有效连续支持内部提取manipulation boundaries；padding及未知支持边缘不当作真假切换。记两组边界为 \(B_r,B_i\)，按同polarity、最大基数、保持时间顺序、最小总绝对时间差完成一一匹配 \(\mathcal M_p\)，仍并列时按边界时间索引字典序确定。
+本项单独定义 \(\mathcal J_{p,F1}^{ref}\) 与 \(\mathcal J_{p,F1}^{id}\)：它们分别由真实target物理网格中的cells构成，要求对应的独立 \(W_p^{ref}\) 或strict \(W_{id,p}\) 行非零且归一化有效、其取值依赖的source provenance已知；reference侧还须有该处独立可靠的时间对应证据。令 \(\mathcal S_p=\mathcal J_{p,F1}^{ref}\cap\mathcal J_{p,F1}^{id}\)。这些F1支持仅由物理网格、独立reference、strict identity与必需的独立provenance确定，禁止使用operational W/R或detector输出筛选；这里不复用02方法对照中包含operational reliability的同名identity支持。先同时裁切到 \(\mathcal S_p\)，再按其每个连续分量，以 `premise.occupancy_boundary_threshold` 二值化并提取内部manipulation boundaries。边界两侧的实际cells须都在该分量内；padding、未知缺口与裁切端点均不产生边界。禁止一侧在自己的完整支持上提取、另一侧仅在reference支持上提取。
+
+记边界集合为 \(B_r,B_i\)。匹配仅在**同一共同支持连续分量、同polarity**内进行：先最大基数，再保持时间顺序并最小化总绝对时间差，仍并列时按边界时间索引字典序确定，得到 \(\mathcal M_p\)；不得跨未知缺口配对。
 
 定义 boundary displacement：
 
 \[
 BTD_p^{task}
 =
-\operatorname{median}\frac{|b_r-b_i|}{output\_grid\_ms}.
+\operatorname{median}_{(b_r,b_i)\in\mathcal M_p}
+\frac{|b_r-b_i|}{output\_grid\_ms}.
 \]
 
-median仅遍历 \(\mathcal M_p\)；无匹配时BTD为not applicable。未匹配边界比例定义为：
+无匹配时BTD为not applicable，不能填0。共同支持内的未匹配边界比例定义为：
 
 \[
 \boxed{U_{B,p}^{task}=\frac{|B_r|+|B_i|-2|\mathcal M_p|}{|B_r|+|B_i|}.}
 \]
 
-两组都为空时该量not applicable；只有一组非空时为1。\(\tau_B\)、\(\tau_U\)、\(q_{min}\)分别引用第7.7节的boundary displacement、task unmatched fraction、meaningful pair fraction。
+两组都为空时该量not applicable；只有一组非空时为1。该量描述共同可观察范围内的边界差异，不把范围外缺失的边界当作消失。若要声称真实边界消失，须有覆盖其相关位置的独立reference或独立删除记录；缺口、零行/零列本身均不是此类证据。\(\tau_B\)、\(\tau_U\)、\(q_{min}\)分别引用第7.7节的boundary displacement、task unmatched fraction、meaningful pair fraction。
 
-定义 source manipulated unmatched mass：
-
-\[
-U_p^{task}
-=
-\frac{
-\sum_j\omega_jY_{x,j}\mathbf1[\sum_iW_{p,ij}^{ref}=0]
-}{
-\sum_j\omega_jY_{x,j}
-}.
-\]
-
-这里 \(\omega_j\) 为source cell实际时长；source manipulated mass为0时该量not applicable，不作除零计算。
-
-pair task-active 当且仅当：
+删除分支使用独立的source物理时间证据。令 \(A_{x,p}\) 为评价source范围内、由独立source provenance确定的manipulated区间集合；\(D_p\)、\(K_p\) 分别为独立记录明确确认已删除、已保留的source区间，二者不重叠；其余未确认区间记为 \(H_p\)。时间范围及证据需支持这种区间划分；仅知某cell的占用比例并不确定区间在cell内的位置。记实际时长为 \(\mu\)，定义删除比例下、上界：
 
 \[
-BTD_p^{task}\ge\tau_B
-\quad\lor\quad
-U_{B,p}^{task}>0
-\quad\lor\quad
-U_p^{task}\ge\tau_U.
+\boxed{
+U_{p,-}^{task}=\frac{\mu(A_{x,p}\cap D_p)}{\mu(A_{x,p})},\qquad
+U_{p,+}^{task}=\frac{\mu(A_{x,p}\cap(D_p\cup H_p))}{\mu(A_{x,p})}.
+}
 \]
 
-family-level `q_active` 为至少一个上述量可定义的预注册可评价pairs中的task-active比例。not applicable项不参与逻辑或；全部不适用的pair单列原因，不计为inactive，也不进入该比例分母。eligible pair数必须满足premise最低量，并报告原始数、有效数、缺失及coverage；有效数不足为INCONCLUSIVE。BTD的family median仅使用有匹配的pairs；没有任何BTD时其条件为不适用，仍可按有效的q_active判断。
+没有未知manipulated时长时，两界相等，记其为 \(U_p^{task}\)。\(\mu(A_{x,p})=0\) 时删除分支结构性不适用，不作除零计算；provenance本身缺失时为unknown。不得用 \(\sum_iW_{p,ij}^{ref}=0\) 确认source删除；也不得把fractional occupancy乘以某cell的删除比例来猜测两者的交集。只有cell级比例而无可定位区间时，须使用这些比例允许的保守交集界，或将该分支记unknown。
+
+对所声明的target评价范围，先检查两个边界分支的证据完整性：默认要求 \(\mathcal S_p\) 覆盖该范围的全部真实cells及其实际时长，提取范围内部边界所需的两侧cells也均完整可观察。只要此条件不成立，**BTD与\(U_B\)两个分支均为unknown，不论已观察值高低**；这些值只能描述共同可观察子范围。原因是子集BTD的median可能高于完整匹配集的median，而裁切可能将完整范围内本可匹配的边界变成未匹配。可以另行明确评价一个满足完整性条件的可观察子范围，但其结论不能用于原范围。此完整性条件仅限制边界证据的解释；删除分支仍独立按上述下、上界判断。
+
+原task-active条件仍为“足够boundary displacement、共同可观察的边界差异、足够删除质量”三者之一；实现时按证据采用三值判定：
+
+- 已证active：满足上述完整性条件的边界证据确认 \(BTD_p^{task}\ge\tau_B\) 或 \(U_{B,p}^{task}>0\)，或独立删除下界 \(U_{p,-}^{task}\ge\tau_U\)。删除下界充分时，即使边界分支unknown，也可独立确认active。
+- 已证inactive：各相关分支均能排除上述条件；删除分支需 \(U_{p,+}^{task}<\tau_U\)。边界分支没有匹配或没有边界只说明该统计量不适用；只有所声称范围内的相关位置已观察且确实没有该类事件时，才能作为结构性不适用而排除该分支。
+- unknown：没有已证active，且至少一个相关分支仍不能排除，包括参考缺口、边界邻域缺失、删除比例两界跨过阈值等。不能仅因为另一个量可定义且低于阈值，就把该pair记为inactive。
+
+family目标pair集合由评价范围和source任务对象决定，不按reference恢复成功或上述三个量是否可定义筛选。source本身确实没有manipulated内容的pair可作为结构性不适用单列；source标注未知的pair保留为unknown。记目标pair总数为 \(N\)，已证active、inactive、unknown数分别为 \(n_A,n_I,n_H\)，三者和为 \(N\)。则目标范围内task-active比例满足：
+
+\[
+\boxed{q_{active}^{-}=\frac{n_A}{N}\ \le q_{active}\le\ q_{active}^{+}=\frac{n_A+n_H}{N}.}
+\]
+
+unknown保留在两界的同一分母内，既不能算inactive，也不能删除后提高active比例。按第8.9节重采样完整source并重算两个界的CI；目标数与实际有证据的source/pair数、结构性不适用、unknown及coverage分别报告。仍按第7.11节 `premise_pairs_per_family` 检查实际可评价pairs的既有最低量，unknown不能冒充已评价证据凑数。最低量仅用于统计解释；证据不足为INCONCLUSIVE，不阻止其它方法开发。
 
 F1 SUPPORTED：
 
 \[
-L_{95}(median\ BTD^{task})\ge\tau_B
+L_{95}(q_{active}^{-})\ge q_{min}.
 \]
 
-或：
+F1 PREMISE_REFUTED：
 
 \[
-L_{95}(q_{active})\ge q_{min}.
+U_{95}(q_{active}^{+})<q_{min}.
 \]
 
-F1 PREMISE_REFUTED：`q_active` 上界低于 \(q_{min}\)，且 boundary displacement 也明确低于 threshold 或完全 not-applicable。
+其它为INCONCLUSIVE。本次将family判决统一到固定目标集合的比例上下界，避免由缺失选择出的matched子集单独决定整个family的结论。family median BTD及其CI仍在有匹配pairs上计算，并明确这是**共同可观察且有匹配的子集条件统计量**；不能以该子集median替代整个目标集合的 \(q_{active}^{-}\) 而绕过unknown。若另行评价该可观察子范围，其F1判决按同一规则独立计算，结论只覆盖该范围。所有分支都已完整观察时，\(q_{active}^{-}=q_{active}^{+}\)，退化为普通task-active比例判决。
 
-其它：INCONCLUSIVE。
+数值核验例：identity通信中，若source唯一的manipulated区间恰落在缺失的5% reference区域，则共同支持上两组边界均为空；该区间属于 \(H_p\)，不是 \(D_p\)，故删除比例为 \([0,1]\)，pair为unknown。若所有目标pairs均如此，\(q_{active}\) 的范围为 \([0,1]\)，F1为INCONCLUSIVE。只有独立记录确认该manipulated区间真的被删除时，删除下界才升至1并产生active证据。
 
-Sparse track使用independent landmarks建立禁止extrapolation的monotonic piecewise-linear map；仅在其覆盖的时间区间计算上述边界量。未观察区间不推断为删除或零occupancy；没有独立删除依据时source unmatched mass项为not applicable。采用相同的边界匹配与q_active判据，结论限定于登记的可观察支持。
+Sparse track使用independent landmarks建立禁止extrapolation的monotonic piecewise-linear map，仅使用已确认可可靠映射的连续时间段；不能跨未确认的插入、删除或landmark缺口补成可靠支持。边界同样在与identity的共同可观察支持内逐分量比较；未观察区间进入上述unknown规则，删除证据仍须来自独立source区间记录。Sparse按同一删除上下界、固定分母及三值判决计算F1；landmark覆盖以外不推断删除或零occupancy，也不声称前提已被否定。
 
 ## 15.2 F2 — Manipulation Occupancy Is Transportable
 

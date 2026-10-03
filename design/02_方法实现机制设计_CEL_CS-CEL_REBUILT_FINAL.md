@@ -6,6 +6,8 @@
 > 文档层级：**Method Contract / Mathematical Specification / Mechanism Identifiability Contract**  
 > 状态：**REBUILT-FINAL / 01-ALIGNED / CONTROL-CLOSED / METHOD-SPACE-CLOSED**
 
+> 修订：2026-10-03，实施前局部修订 v1.1。保留01原语，补齐M4、矩阵距离、有限negative bank及推理接口，收窄F4解释。实际运行就绪状态以03的数据、配置和阶段记录为准。
+
 ---
 
 # 0. 权威链、设计目标与重构原则
@@ -293,6 +295,10 @@ i:\hat R_{p,i}>0,\ \sum_j\hat W_{p,ij}>0
 \]
 
 不得记为 zero loss。
+
+## 2.6 训练与单音频推理接口
+
+训练输入为paired \(x,x'\)、source标签及该阶段允许的W/R；formal primary仍按第4节只使用source直接监督。部署接口为单个待检音频 \(u\mapsto P_\theta(u)\)，输出与该音频自身物理时间网格绑定的manipulation field及真实音频有效mask。推理不需要原始source音频、通信链ID、W/R或negative bank；这些对象服务于训练和机制验证。阈值化区间、切窗合并及重采样时间映射按03事前固定，不能借用测试标签。
 
 ---
 
@@ -728,6 +734,8 @@ formal primary：
 \boxed{d(a,b)=\operatorname{SmoothL1}(a,b).}
 \]
 
+beta统一取03第7.1节的 `numerical.smooth_l1_beta`，M3′、M5及其screen对应项使用同一值。
+
 其它 discrepancy 只允许 secondary ablation。
 
 ## 9.2 Correspondence discrepancy
@@ -738,7 +746,23 @@ formal primary：
 \boxed{d_W^{row}(q,r)=W_1^{(t)}(q,r).}
 \]
 
-对两个 correspondence matrices，只在共同 nonzero target support 上比较。\(d_W\) 不使用 \(\hat R\) weighting，避免 reliability self-masking。
+对同一source/target物理网格上的两个矩阵 \(W,V\)，令
+
+\[
+\mathcal J(W,V)=\{i:\sum_jW_{ij}>0,\ \sum_jV_{ij}>0,\ \omega_i>0\},
+\qquad \omega_i=\text{target cell }i\text{与真实音频支持相交的时长}.
+\]
+
+只在 \(\mathcal J\ne\varnothing\) 上定义矩阵级标量：
+
+\[
+\boxed{d_W(W,V)=
+\frac{\sum_{i\in\mathcal J}\omega_i
+ d_W^{row}(\operatorname{RN}_0(W_{i,:}),\operatorname{RN}_0(V_{i,:}))}
+{\sum_{i\in\mathcal J}\omega_i}.}
+\]
+
+source时间以毫秒计，因此 \(d_W\)、U-REF achieved error和 \(\delta_W\) 均以毫秒计。不同网格先按固定物理时间合同适配，不能直接比较矩阵下标。\(d_W\) 不使用 \(\hat R\) weighting，避免reliability self-masking；空共同支持为not applicable，不记零。该量不惩罚缺失覆盖，必须另报共同支持和coverage。U-REF与CS仍分别满足各自的same-support约束，不能删去困难行降低距离。
 
 ## 9.3 Occupancy discrepancy
 
@@ -753,7 +777,7 @@ d_Y(a,b;\mathcal J)
 }
 \]
 
-空集合时为 not applicable。
+\(\omega_i\) 同第9.2节，为实际有效cell时长；最后一个不足整格的真实cell按其实际时长计。空集合时为 not applicable。
 
 ---
 
@@ -1027,13 +1051,18 @@ primary feature 仅允许使用第6.4节 canonical tap：
 H_\theta(u)\in\mathbb R^{L_u^h\times D_h}.
 \]
 
-feature transport 只能由同一最终 \(\hat W_p\) 通过固定 physical-time grid projection 诱导，不允许 feature-specific re-alignment。
+feature loss在M5使用的manipulation-output grid上评价。定义固定时间插值矩阵
+\(\Pi_s\in\mathbb R^{N_p\times L_x^h}\)、\(\Pi_t\in\mathbb R^{M_p\times L_{x'}^h}\)：每个output cell中心在相邻native feature中心间作线性插值；恰好重合时为one-hot；超出feature中心凸包或涉及padding时该行无效，禁止extrapolation。两网格相同时取identity。这是固定时间适配，不是可学习的通道projector。
 
-source feature 使用 stop-gradient：
+唯一执行顺序为：**时间插值 → 使用同一最终W传输未归一化source feature → 两侧分别L2归一化 → 计算差异**：
 
 \[
-H_{src}(x)=\operatorname{sg}(H_\theta(x)).
+\widetilde H_s=\Pi_s\operatorname{sg}(H_\theta(x)),\qquad
+\widetilde H_t=\Pi_tH_\theta(x'),\qquad
+\bar H_s=\hat W_p\widetilde H_s.
 \]
+
+不得另估feature-specific W，也不得改成“先归一化source各行再传输”。W、R和时间插值矩阵均不接收detector梯度。
 
 row-wise L2 normalization：
 
@@ -1047,7 +1076,16 @@ feature discrepancy：
 \boxed{d_h(a,b)=1-a^\top b.}
 \]
 
-formal feature loss 仅在 transported feature 与 target feature 都具有非零范数且 correspondence valid 的 rows 上计算。
+令 \(\mathcal I_p^h\subseteq\mathcal I_p^+\) 为target插值有效、该W行所有正权重source列的插值均有效，且 \(\|\bar H_{s,i}\|_2>\varepsilon_h\)、\(\|\widetilde H_{t,i}\|_2>\varepsilon_h\) 的行。任何缺失项均不得以零feature补入；记录剔除原因与相对 \(\mathcal I_p^+\) 的覆盖率。
+
+\[
+\boxed{\mathcal L_{SameWFeat}(p)=
+\frac{\sum_{i\in\mathcal I_p^h}\hat R_{p,i}
+ d_h\!\left(\nu(\widetilde H_{t,i}),\nu(\bar H_{s,i})\right)}
+{\sum_{i\in\mathcal I_p^h}\hat R_{p,i}}.}
+\]
+
+空 \(\mathcal I_p^h\) 为not applicable，不能记零。有效pair的feature项先逐pair计算，再对batch中适用pair等权平均；base supervision仍对全部监督有效source样本计算。该归约与M5一致；不得按各模型的结果改变paired data或采样顺序。
 
 \[
 \boxed{
@@ -1118,12 +1156,12 @@ formal F4 仍以完整 task-evaluable set 上的 M5 vs M2 为 primary effect，�
 解释纪律：
 
 ```text
-若 F4 总效应为正且 common-support 也为正，可称 accuracy-mediated transport necessity；
-若 F4 总效应主要来自 W-only support，只能称 coverage-mediated transport necessity；
-不得把 coverage-mediated 结果表述为“W 在共同 support 上更准确”。
+若 F4 总效应为正且 common-support 也为正，报告“收益在共同有效区域仍可观察到”；
+若收益主要集中在 W-only support，报告“收益主要出现在额外覆盖区域”；
+不得仅凭上述区域分解断言 correspondence accuracy 的因果贡献，或排除训练coverage的间接影响。
 ```
 
-因此 F4 的总判定仍忠实于 01，但归因不再混杂。
+F4仍检验01的transport相对identity是否有增益。两模型训练时的支持可能不同，共同区域上的评价不能消除这种训练差异；本节提供描述性分解，不单独证明中介或因果归因。若要作更强归因，须另行事前规定训练支持匹配的研究，不能由当前F4自动推出。
 
 ---
 
@@ -1250,6 +1288,16 @@ negative set：
 
 若为空，该 pair 可参与 CEL，但不可参与 CS。
 
+上述 \(\mathcal N_p\) 是抽象admissible集合。实际训练和评价使用预注册、有限、去重后的bank
+
+\[
+\boxed{\mathcal B_p=\{W_{p,1}^-,\ldots,W_{p,K_p}^-\}\subseteq\mathcal N_p(\delta_W).}
+\]
+
+generator family、参数、候选数上限、确定性seed规则、去重与合法性检查均在读取该partition的Y前冻结。train/dev保存实际bank hash；test只在相应数据解封后按锁定生成器实例化，先保存bank hash再读取test Y。不得按标签或detector loss补采、删选bank；训练可在冻结bank内按第17节取hardest negative，但不更新bank。
+
+第16–17节的可实现最小值均取自 \(\mathcal B_p\)。空bank使CS项不适用，CEL仍可适用。F7结论限定于登记的有限候选族和scope：一般有 \(\min_{\mathcal B_p}\ge\inf_{\mathcal N_p}\)，bank上通过informative gate不能推出对所有admissible alternatives均可辨识。01的抽象原语保留，该bank是本次方法实例的操作性范围。
+
 negative route order：
 
 \[
@@ -1264,7 +1312,7 @@ formal F7 后不得重新选择 negative family。
 
 # 16. Correspondence-Informative Operational Gate
 
-只有 \(\mathcal I_p^+\neq\varnothing\) 且 \(\mathcal N_p(\delta_W)\neq\varnothing\) 时定义。
+只有 \(\mathcal I_p^+\neq\varnothing\) 且 \(\mathcal B_p\neq\varnothing\) 时定义。
 
 执行顺序必须为：
 
@@ -1281,7 +1329,7 @@ formal F7 后不得重新选择 negative family。
 \[
 \widehat{\operatorname{Sep}}_p
 =
-\min_{W_p^-\in\mathcal N_p(\delta_W)}
+\min_{W_p^-\in\mathcal B_p}
  d_Y(\hat W_pY_x,W_p^-Y_x;\mathcal I_p^+).
 \]
 
@@ -1332,7 +1380,7 @@ hardest negative：
 \[
 D_\theta^-(p)
 =
-\min_{W_p^-\in\mathcal N_p(\delta_W)}D_\theta(p;W_p^-).
+\min_{W_p^-\in\mathcal B_p}D_\theta(p;W_p^-).
 \]
 
 selectivity loss：
@@ -1359,6 +1407,8 @@ formal CS-CEL：
 \]
 
 formal source topology 仍唯一为 G-A。
+
+F7比较的CEL控制与CS-CEL必须从同一seed的同一M5 checkpoint出发，使用相同追加训练数据、采样次序、optimizer、共享超参数及optimizer更新步数。CEL控制只优化 \(\mathcal L_{loc}+\lambda_{CEL}\mathcal L_{CEL}^{sg}\)，CS分支增加上述selectivity项；CS参数的dev搜索范围与预算由03事前固定。所谓“冻结M5”指冻结起点身份、方法配置及W/R，不是用未继续训练的旧checkpoint对比额外训练后的CS模型。
 
 ---
 
@@ -1463,7 +1513,7 @@ U-REF Stage P perturbation。
 | F5 supported | paired prediction transport 超出 matched transported-label supervision |
 | F6 supported | output-space action 超出 same-W feature action |
 | F4–F6 同 scope 全 supported | CEL = Validated Mechanism Contribution at that scope |
-| F7 supported | CS-CEL = Validated Strong Extension |
+| F7 supported | CS-CEL = Validated Strong Extension within registered finite negative family and scope |
 | F5 practical-null | 不再主张 prediction transport 的独立必要性 |
 | F6 practical-null | 不再主张 output-space action 的独立必要性 |
 | F4 practical-null | 不再主张 sample-conditioned transport necessity |
@@ -1505,7 +1555,7 @@ Stage P 结果用于选择有利 formal method definition；
 用 CTRL 的 F4–F6 与 REAL 的 F1–F3 拼接 Strong Real CEL；
 把 authenticity-stratified error difference 自动解释为 label leakage；
 把 oracle-centered U-REF 当作 operational error distribution；
-把 F4 coverage-mediated gain 表述为 common-support accuracy superiority。
+仅凭F4区域分解宣称排除了训练coverage影响或证明了common-support correspondence accuracy的因果贡献。
 ```
 
 ---

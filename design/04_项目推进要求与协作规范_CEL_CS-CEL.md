@@ -1,6 +1,7 @@
 # CEL 项目推进要求与协作规范
 
-版本：1.0  
+版本：1.1
+
 整理与核对日期：2026-10-03  
 适用项目：Communication-Equivariant Localization with Correspondence Selectivity（CEL / CS-CEL）  
 用途：任务启动、方法实施、子智能体协作、独立审查、运行交付与阶段交接。
@@ -50,7 +51,7 @@
 | Stage 0A / 0B | 核实真实参考可行性与早期采集条件，完成正式协议冻结 |
 | Stage 1 | 在对应 scope 验证 F1/F2 前提 |
 | Track L 与 Track C | 在 F1/F2 同 scope 支持后，推进 Localizer 与 W/R 的开发、资格验证、锁定和独立测试 |
-| Stage 4P / 4D / 4L / 4T | 满足合流条件后，依次完成统计功效锁定、机制开发、机制锁定和 F4/F5/F6 正式检验 |
+| Stage 4D / 4P / 4L / 4T | 满足合流条件后，先开发并固定机制模型，再估计功效和样本量、完成机制锁定，最后作 F4/F5/F6 正式检验 |
 | Stage 5T | 按前置条件和冻结方案评价真实通信链 |
 | Stage 6D / 6L / 6T | 按前置条件推进 CS 扩展并检验 F7 |
 | Stage 7 | 汇总冻结产物，形成主张与证据绑定的最终结果包 |
@@ -103,10 +104,10 @@ Track L 与 Track C 可按 03 并行推进；资源受限时可优先 W/R 这一
 
 | 命题 | 必要比较与解释边界 |
 | --- | --- |
-| F4 | M5 对 M2 strict identity/no-transport；同时保存 coverage 与 common-support 归因分解 |
+| F4 | M5 对 M2 strict identity/no-transport；保存 coverage 与 common-support 描述性区域分解，不单独推断精度的因果贡献 |
 | F5 | M5 对 M3′ matched aligned-supervision；保持规定的 discrepancy、R、有效支持、监督、数据和训练预算可比性 |
 | F6 | M5 对 M4 same-W feature control；使用规定的 canonical feature tap 与固定网格投影 |
-| F7 | 在已满足的前置条件下，按冻结 negative bank、informative gate 和 03 的判据评价 CS 的附加价值 |
+| F7 | 同起点、同数据和追加更新预算的 CEL/CS 对照；按冻结 finite negative bank、informative gate 和 03 判据评价，主张限定于登记候选族与scope |
 
 M3 native 是次级诊断对照，不能代替 M3′ 产生 F5 正式结论。Formal CEL 使用 02 规定的 G-A；其他拓扑及 oracle 对象按其登记用途使用。Stage P 结果用于资源筛查，不能用于事后选择有利的正式方法定义、对照或阈值。
 
@@ -213,11 +214,11 @@ M3 native 是次级诊断对照，不能代替 M3′ 产生 F5 正式结论。Fo
 
 Notebook 按 03 第 31–33 节保持薄 orchestration。每个 stage/phase 使用唯一入口，Run all 只执行本次选定且满足前置条件的阶段任务。
 
-运行入口按协议完成源码版本定位、Drive 挂载、01/02/03 hash 核验、stage lock 与 partition seal 核验、环境准备及冻结缓存加载，然后调用实际 runner，保存 checkpoint、raw records、manifest、耗时/内存/重试记录及产物。
+本地脚本与Notebook均按03第32–33节完成源码版本定位、01/02/03 hash核验、当前阶段适用的lock/seal与数据manifest核验、环境准备及冻结缓存加载，然后调用实际runner并保存checkpoint、raw records、manifest及资源记录。仅Colab使用Drive时挂载；Stage P及开发阶段不要求未来阶段才生成的锁，正式test仍须具备全部对应证据。本地环境与启动实例分别引用03第32、7.19节，不在本文复制另一份配置。
 
 - 同一入口不同时读取本应由 seal 隔离的数据划分。
 - 算法与科学配置保存在项目规定的实现与配置位置，Notebook 不维护第二份算法或临时改阈值。
-- 完全冻结 backbone 的阶段按 source identity 校验并复用 feature cache。
+- 完全冻结backbone的阶段按03第32.1节的完整cache key校验：source身份、实际波形及变换/预处理、模型revision、特征层与精度。不能仅凭同一source identity复用原音与不同通信realization的特征。
 - 中断续跑使用同一 run manifest 及完整 optimizer/scheduler state；无法恢复时按 03 重启并保留原失败记录。
 - OOM 等资源问题定位到实际阶段、计算图和活张量，修复后仍保持方法语义及正式预算。
 - Notebook 交付与真实执行分别报告。用户要求自行运行时，完成必要检查和交付，实际运行状态等待运行证据更新。
@@ -228,12 +229,14 @@ Notebook 按 03 第 31–33 节保持薄 orchestration。每个 stage/phase 使�
 
 | 证据 | 可支持的范围 |
 | --- | --- |
-| 静态、CPU、合成或受控检查 | 对应接口、接线、支持语义及受控条件下的机制性质 |
+| 工程检查（运行设备不限） | 实际覆盖的接口、接线、支持语义及实现性质；不自动形成科学阶段判定 |
 | Stage P 与 oracle screen | 资源筛查及声明构造下的候选信号；不产生 F1–F7 正式结论 |
 | 独立前提与可行性验证 | 对应 scope 的 F1/F2/F3 及 localizer 判定，是否允许进入机制验证依 03 |
 | 正式机制检验 | 同 scope 的 F4/F5/F6 全部支持后，形成该范围内的 CEL 机制贡献 |
 | 真实链与扩展证据 | Strong Real CEL 需要同一 REAL scope 的 F1–F6 与 Stage 5；CS 附加主张按 F7 及前置条件判定 |
 | 代理审查和工程交付 | 表示实际覆盖范围内的审查或交付状态，实验与科学结论另附证据 |
+
+正式证据等级由协议、数据身份、阶段和scope决定，不由CPU/GPU或本地/Colab决定。满足完整协议的受控实验可形成CTRL范围内的正式证据；GPU上的合成安装检查仍只是工程验收。
 
 结果包保留全部正式 run、资格验证历史、invalidation、失败、缺失、排除与终局证据。不得跨 scope、跨方法版本或跨分支挑选最佳结果拼接完整方法主张。
 

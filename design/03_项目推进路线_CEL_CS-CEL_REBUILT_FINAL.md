@@ -4,7 +4,9 @@
 > 上游方法合同：`02_方法实现机制设计_CEL_CS-CEL_REBUILT_FINAL.md`  
 > 文档职责：把冻结算法原语与重构后的方法合同转换为一套完整、可终止、抗 route-shopping、具有预注册 power 的执行协议。  
 > 文档层级：**Project Execution Manual / Pre-registration Protocol / Evidence SOP**  
-> 状态：**REBUILT-FINAL / 01-02-ALIGNED / STATE-CLOSED / POWER-LOCKED / EXECUTION-READY**
+> 状态：**REBUILT-FINAL / 01-02-ALIGNED / PRE-RUN-CONFIGURATION-REQUIRED**
+
+> 修订：2026-10-03，实施前局部修订 v1.1。补齐判决、统计口径及启动实例；正式研究尚未运行。第7.19节的真实数据与模型revision字段落实、对应阶段前置检查完成后，才具备该阶段的运行条件。
 
 ---
 
@@ -225,9 +227,9 @@ Stage 1   Formal F1 / F2 Premise Audit
 │ Stage 2D → 2L → 2T            │ Stage 3D → 3Q-A → 3Q-B → 3L → 3T │
 └───────────────────────────────┴────────────────────────────────┘
     ↓ merge only if LOCALIZER_SUPPORTED AND F3=SUPPORTED
-Stage 4P  Mechanism Power / Precision Lock
-    ↓
 Stage 4D  M2 / M3′ / M4 / M5 Development
+    ↓
+Stage 4P  Mechanism Power / Precision Lock
     ↓
 Stage 4L  Mechanism Lock
     ↓
@@ -339,6 +341,8 @@ D_{\mathrm{cs-dev}},
 D_{\mathrm{cs-test}}.
 \]
 
+另登记 \(D_{\mathrm{cs-train}}\)。默认继承同scope的 \(D_{\mathrm{mech-train}}\) 身份清单，不能使用任何dev、qualification或test身份作CS训练；cs-dev / cs-test分别与训练身份隔离，且不复用已读取效果的formal test。CEL控制和CS分支共用同一cs-train清单。
+
 ## 5.8 Source-identity leakage
 
 同一 source utterance 的 codec、noise、RTC、re-recording、speed、deletion、jitter、augmentation、perturbation realization 必须继承同一上层 split identity。
@@ -400,6 +404,7 @@ output_grid_ms: 20
 numerical:
   epsilon_D: 1.0e-8
   epsilon_h: 1.0e-8
+  smooth_l1_beta: 1.0
 ```
 
 ## 7.2 Stage P 固定模型配置
@@ -453,7 +458,7 @@ screen:
   max_total_screen_model_runs: 28
 ```
 
-P2/P3 的 formal screen comparator 为 O2/O3′/O4/O5。
+P2/P3 的 formal screen comparator 为 O2/O3′/O4/O5。`localizer_min_mixed_partial`指screen-dev中至少96个独立source utterance的mixed-partial可评价实例；`min_pairs_per_family`指每family至少48个usable dev pairs，同一母音频的多个窗口不增加独立身份数。训练规模单独记录，不能与dev数量相加凑下限。
 
 ## 7.4 C0 time-preserving baseline
 
@@ -709,6 +714,88 @@ RB-EER 的 threshold sweep 只属于 metric computation，不是 protocol thresh
 
 ---
 
+## 7.19 Stage P 启动实例与待落实字段
+
+以下实例在首次读取screen模型效果前固定。`null`表示尚未取得的信息，不表示可跳过；数据集、release、路径、身份/标签及train/dev清单、不可变模型revision与文件hash全部落实后，才可启动使用预训练特征的P1–P3。当前本地环境验收不填补这些数据条件。
+
+```yaml
+screen_instance:
+  dataset:
+    dataset_id: null
+    release: null
+    audio_root: null
+    source_interval_manifest: null
+    source_identity_manifest: null
+    screen_train_manifest: null
+    screen_dev_manifest: null
+    label_intervals: half_open_seconds
+    split_unit: parent_source_utterance
+  audio:
+    sample_rate_hz: 16000
+    channels: mono
+    multichannel_rule: arithmetic_mean
+    decode_dtype: float32
+    resampler: torchaudio.functional.resample
+    window_seconds: 10
+    minimum_window_seconds: 3
+    window_rule: deterministic_nonoverlap
+    final_partial_cell: keep_with_actual_duration
+  identity:
+    data_seed: 20261003
+    screen_seed_ids: [17, 29]
+    pair_seed_rule: sha256_of_data_seed_parent_id_window_id_family
+    model_id: microsoft/wavlm-base-plus
+    model_revision: null
+    model_file_hashes: null
+    processor_revision: null
+    feature_layer: last_hidden_state
+    feature_extraction_mode: eval_no_grad
+    feature_extraction_dtype: float32
+    cache_dtype: float32
+  controlled_families:
+    prefix_crop:
+      removal_ms: [80, 160, 320]
+    interior_delete:
+      removal_ms: [80, 160, 320]
+      start_fraction: [0.25, 0.50, 0.75]
+      minimum_retained_side_ms: 400
+    boundary_grid: output_grid_ms
+    parameter_selection: deterministic_label_blind
+    pairs_per_window_per_family: 1
+    crossfade: false
+  u_ref:
+    family: endpoint_fixed_source_time_sine_warp
+    max_point_displacement_ms: 160
+    derivative_relative_to_reference_range: [0.75, 1.25]
+    amplitude_bisection_iterations: 40
+  p0_numeric:
+    row_sum_abs_tolerance: 1.0e-6
+    occupancy_max_abs_tolerance: 1.0e-6
+    timing_map_tolerance_samples: 1
+  runtime:
+    python: /home/richar/project/CEL/.venv/bin/python
+    environment_lock: requirements/local-cu128.lock.txt
+    device: cuda:0
+    feature_microbatch_initial: 1
+    head_microbatch_initial: 4
+    accumulation_steps_initial: 8
+    dataloader_workers_initial: 2
+    model_cache: .cache/models
+    feature_cache: .cache/features
+    artifacts: artifacts/stageP_screen
+```
+
+构造与执行口径：
+
+1. 先按母source身份划分数据，再确定性切窗；尾部不足minimum window的窗口按预声明规则排除并记账，保留窗口内不足一个output cell的真实尾部。不得按伪造边界或效果挑选窗口、删除位置或强度。先由SHA-256所得整数对合法参数笛卡尔积取模选一个组合，再执行；没有合法组合记不可构造，不换seed重抽。
+2. waveform编辑器保存target sample→source sample的整数索引映射。reference构造器只读取该timing记录生成一热 \(W^{ref}\) 与有效行 \(R^{ref}=1\)；另一路直接编辑原始source区间provenance并独立binning得到 \(Y_{x'}\)，不得读取W或离散化的 \(Y_x\) 生成目标标签。两路可共享已知编辑操作，但不声称统计独立。
+3. 前缀裁剪检验整体偏移，内部删除检验局部跳跃；全部编辑边界对齐output grid，不加入crossfade、codec或noise混合。该实例只代表这两个controlled families，不自动代表真实RTC链。
+4. U-REF对参考source-time路径 \(s_i\) 使用 \(\tilde s_i=s_i+\sigma a\sin(\pi(s_i-s_{min})/(s_{max}-s_{min}))\)，其中符号由pair seed固定。幅度在最大点位移和相对参考路径导数范围内二分搜索，以02第9.2节矩阵距离达到第7.3节误差levels；相邻source cell中心线性插值生成W，端点与target support保持不变。参考路径中的合法skip保留，导数约束针对对参考路径的扰动。不可达按P3的INCONCLUSIVE处理，不换扰动族。
+5. P1在source清单上训练；P2/P3所有变体共用按source及family等权的预先固定pooled pair清单，不为每个family另建一套28-run模型矩阵。micro-batch和累积可按显存调整，但有效batch、loss归约及optimizer步数按第7.2和32.5节保持一致。SmoothL1的beta取第7.1节。
+6. source/target特征分别缓存，key按第32.1节。首次获取模型时将远端revision解析为commit SHA并记录文件hash；不能以可变的`main`充当锁定revision。训练集规模和时长分布由实际数据盘点填写，不虚构已满足下限。
+
+---
+
 # 8. Global Statistical Rules
 
 ## 8.1 Minimum-first rule
@@ -804,7 +891,7 @@ Holm-corrected support p < alpha。
 
 ## 8.5 F4/F5/F6 practical-null family
 
-仅对未 SUPPORTED 的 \(F_k\) 执行：
+固定对 \(k\in\{4,5,6\}\) 的三个假设共同计算并执行Holm correction：
 
 \[
 H_{0k}^{null}:\Delta_k\ge\epsilon_{main}.
@@ -818,11 +905,11 @@ AND
 Holm-corrected equivalence p < alpha。
 ```
 
-其它为 INCONCLUSIVE。
+判决顺序为：先按第8.4节判断SUPPORTED；仅对未SUPPORTED的项采用本节经固定三项family校正后的PRACTICAL_NULL结论；其它为INCONCLUSIVE。不得根据同批support结果删除假设、缩小null family后重新校正。两组family分别报告其三个原始p值及校正值。
 
 ## 8.6 Stage 4 power planning
 
-Stage 4P 在 `D_mech-dev` 上估计每个 source utterance 的 seed-averaged paired difference 标准差：
+Stage 4D先在mech-train训练、mech-dev选择并固定M2/M3′/M4/M5的候选与checkpoint；随后Stage 4P使用这些固定模型在 `D_mech-dev` 上的预测，估计每个source utterance的seed-averaged paired difference标准差：
 
 \[
 \hat\sigma_k,\qquad k\in\{4,5,6\}.
@@ -836,7 +923,7 @@ Stage 4P 在 `D_mech-dev` 上估计每个 source utterance 的 seed-averaged pai
 \beta=1-\texttt{power_target}.
 \]
 
-对目标 effect \(\epsilon_{main}\)，近似 required sample：
+`power_target`唯一指：真实效应为 \(\epsilon_{main}\) 时，单个 \(H_{0k}^{sup}:\Delta_k\le0\) 在保守 \(\alpha/3\) 水平下的近似检验功效。它不是完整SUPPORTED复合条件、也不是F4/F5/F6同时通过的概率。以该planning alternative估计required sample：
 
 \[
 \boxed{
@@ -866,6 +953,8 @@ n_5^{req},
 n_6^{req}
 ).
 \]
+
+还须满足各major family的预注册最低数量，整数分配在读取test effect前固定。若将来要以“完整SUPPORTED通过概率”为设计目标，需在test解封前另行规定大于 \(\epsilon_{main}\) 的planning alternative，并模拟完整判决；本版本不作该功效保证。在真实效应恰等于 \(\epsilon_{main}\) 且估计近似对称时，点估计过该阈值的概率约为一半，不能由上式声称整体通过率为80%。dev方差只是规划估计，其来源、样本量与不确定性随power lock保存。
 
 若：
 
@@ -926,17 +1015,7 @@ Delta4_common；
 W-only localization behavior。
 ```
 
-如果 primary F4 supported，但 `Delta4_common <= 0` 且增益主要来自 W-only support，则论文解释必须使用：
-
-```text
-coverage-mediated transport necessity
-```
-
-不得使用：
-
-```text
-common-support correspondence accuracy superiority。
-```
+按02第12节作描述性区域分解：common-support上的正收益说明收益在共同区域仍可观察到；W-only集中收益说明收益主要位于额外覆盖区域。两模型训练支持可能不同，不能据此排除训练coverage的间接效应，也不能单独主张对齐精度的因果贡献。
 
 ---
 
@@ -965,6 +1044,8 @@ W^{ref}\neq W_{id}
 \[
 Y_{x'}\approx W^{ref}Y_x.
 \]
+
+对第7.19节的整格精确编辑实例，`≈`唯一指有效target cells上的最大绝对occupancy差不超过 `p0_numeric.occupancy_max_abs_tolerance`；同时检查W非负、有效行和为1（容差见registry）、无效行和为0、timing映射误差不超过登记的sample容差。无有效支持、错误shape或非有限值属于construction failure，不能以零误差通过。该构造容差不替代formal F2阈值。
 
 usable pairs 未达到 `screen.min_pairs_per_family`：
 
@@ -1033,7 +1114,7 @@ AUPRC(O5_0)-AUPRC(O3'_0),
 AUPRC(O5_0)-AUPRC(O4_0).
 \]
 
-若 O5 在全部 seeds 上相对 O3′ 或 O4 明确负向超过 \(\epsilon_{screen}\)，则 SCREEN_NONPROMISING；否则进入 P3。
+若存在同一个固定对照（O3′或O4），使O5在全部screen seeds上对该对照的差量均严格小于 \(-\epsilon_{screen}\)，则SCREEN_NONPROMISING；否则进入P3。不能把不同seed各自最不利的对照拼成停止条件。
 
 ---
 
@@ -1052,6 +1133,10 @@ W_e=\mathcal P_e(W^{ref}).
 \[
 e_{achieved}=d_W(W_e,W^{ref}).
 \]
+
+误差按02第9.2节逐pair计算，bank在读取模型效果前生成并固定，所有方法与seed共用。三个nonzero levels必须在同一预先固定的train/dev pair清单上都达到目标±`perturbation_target_tolerance_ms`，保持原target support和admissibility；任一级不可达、缺失或跨level achieved error重复时，记录原因并判SCREEN_INCONCLUSIVE。不得删除不利pair、临时换样本或删level来获得趋势。
+
+每个level的横坐标是固定dev清单上先按source utterance汇总、再等权平均的achieved error。每个seed独立计算各模型AUPRC，先取paired difference，再对两个固定seed等权平均；本节无seed下标的 \(\Delta_5^{screen}(e)\)、\(\Delta_6^{screen}(e)\) 均指该seed均值，同时保存两个seed各自结果。多个realization先在同一source内部等权汇总。
 
 训练 / 评价：
 
@@ -1081,7 +1166,7 @@ SCREEN_PROMISING 满足以下任一：
 
 或
 
-Delta5_screen 随 achieved error 呈正向 Spearman trend，
+三个nonzero levels的seed-mean Delta5_screen对achieved error的Spearman rho > 0，
 且最高 achieved-error level Delta5_screen >= 0。
 ```
 
@@ -1091,7 +1176,9 @@ Delta5_screen 随 achieved error 呈正向 Spearman trend，
 \Delta_6^{screen}\ge-\epsilon_{screen}.
 \]
 
-SCREEN_NONPROMISING：全部 nonzero levels 均明确负向超过 \(\epsilon_{screen}\)。
+Spearman使用average ranks；这是三个level上的描述性筛查规则，不作显著性检验。若三个差量相同使rho未定义，则趋势分支不成立，仍可按绝对增益分支判断。“最高level”按实际横坐标确定。
+
+SCREEN_NONPROMISING：三个nonzero levels、两个seed各自的 \(\Delta_{5,s}^{screen}(e)\) 全部严格小于 \(-\epsilon_{screen}\)。
 
 其它：SCREEN_INCONCLUSIVE。
 
@@ -1196,7 +1283,7 @@ strict identity occupancy：
 Y_p^{id}=W_{id,p}Y_x.
 \]
 
-从 occupancy field 提取 manipulation boundaries；按同 polarity、最大基数、保持时间顺序、最小总绝对时间差完成一一匹配。
+以 `premise.occupancy_boundary_threshold` 将occupancy field二值化，在各自有效连续支持内部提取manipulation boundaries；padding及未知支持边缘不当作真假切换。记两组边界为 \(B_r,B_i\)，按同polarity、最大基数、保持时间顺序、最小总绝对时间差完成一一匹配 \(\mathcal M_p\)，仍并列时按边界时间索引字典序确定。
 
 定义 boundary displacement：
 
@@ -1205,6 +1292,14 @@ BTD_p^{task}
 =
 \operatorname{median}\frac{|b_r-b_i|}{output\_grid\_ms}.
 \]
+
+median仅遍历 \(\mathcal M_p\)；无匹配时BTD为not applicable。未匹配边界比例定义为：
+
+\[
+\boxed{U_{B,p}^{task}=\frac{|B_r|+|B_i|-2|\mathcal M_p|}{|B_r|+|B_i|}.}
+\]
+
+两组都为空时该量not applicable；只有一组非空时为1。\(\tau_B\)、\(\tau_U\)、\(q_{min}\)分别引用第7.7节的boundary displacement、task unmatched fraction、meaningful pair fraction。
 
 定义 source manipulated unmatched mass：
 
@@ -1218,6 +1313,8 @@ U_p^{task}
 }.
 \]
 
+这里 \(\omega_j\) 为source cell实际时长；source manipulated mass为0时该量not applicable，不作除零计算。
+
 pair task-active 当且仅当：
 
 \[
@@ -1228,7 +1325,7 @@ U_{B,p}^{task}>0
 U_p^{task}\ge\tau_U.
 \]
 
-family-level `q_active` 为 task-active pair fraction。
+family-level `q_active` 为至少一个上述量可定义的预注册可评价pairs中的task-active比例。not applicable项不参与逻辑或；全部不适用的pair单列原因，不计为inactive，也不进入该比例分母。eligible pair数必须满足premise最低量，并报告原始数、有效数、缺失及coverage；有效数不足为INCONCLUSIVE。BTD的family median仅使用有匹配的pairs；没有任何BTD时其条件为不适用，仍可按有效的q_active判断。
 
 F1 SUPPORTED：
 
@@ -1246,7 +1343,7 @@ F1 PREMISE_REFUTED：`q_active` 上界低于 \(q_{min}\)，且 boundary displace
 
 其它：INCONCLUSIVE。
 
-Sparse track 使用 independent landmarks 建立禁止 extrapolation 的 monotonic piecewise-linear map，使用同构的 boundary displacement 与 q_active 判据。
+Sparse track使用independent landmarks建立禁止extrapolation的monotonic piecewise-linear map；仅在其覆盖的时间区间计算上述边界量。未观察区间不推断为删除或零occupancy；没有独立删除依据时source unmatched mass项为not applicable。采用相同的边界匹配与q_active判据，结论限定于登记的可观察支持。
 
 ## 15.2 F2 — Manipulation Occupancy Is Transportable
 
@@ -1257,6 +1354,8 @@ Y_{x'}:=W^{ref}Y_x.
 \]
 
 target GT 必须来自 independent target provenance。
+
+segment mIoU统一按pair计算：将两侧被比较的occupancy/区间provenance在共同参考有效支持内裁切，并按第7.7节阈值取最大连续manipulated区间。设区间集合为A、B，使用最大总IoU的一一匹配，未匹配项记0，pair分数为匹配IoU之和除以 \(\max(|A|,|B|)\)。两集合都为空时该指标not applicable；只一侧为空时为0。禁止用裁切支持边界产生额外虚假切换。family统计只使用该指标可评价的pairs，须满足最低量，并同时报告不适用比例。
 
 Dense：
 
@@ -1279,6 +1378,21 @@ Sparse 必须同时具有 independent timing landmarks 与 independent target ma
 \[
 \boxed{F2=INCONCLUSIVE.}
 \]
+
+条件齐备时，使用通过第7.6节质量检查的landmarks构造固定source→target分段线性单调映射。将source manipulation区间裁切到landmark覆盖范围后映射其端点；target区间由独立provenance给出，并裁切到同一target可观察范围。按上面的pair segment mIoU计算 \(J_p^{sparse}\)，对source utterance重采样得到其family median的CI：
+
+\[
+\begin{aligned}
+L_{95}(\operatorname{median}_p J_p^{sparse})\ge
+\texttt{premise\_f2.sparse.median\_segment\_iou\_min}
+&\Rightarrow SUPPORTED,\\
+U_{95}(\operatorname{median}_p J_p^{sparse})<
+\texttt{premise\_f2.sparse.median\_segment\_iou\_min}
+&\Rightarrow PREMISE\_REFUTED.
+\end{aligned}
+\]
+
+其余为INCONCLUSIVE。最小样本、reference覆盖与误差要求先于该判决；不能将landmark之间未确认的插入/删除区间强行插值为可靠支持。无法界定可靠映射段时，该pair缺失并保留原因。Sparse结论不外推至未观察区间，也不以Sparse W fidelity代替本项occupancy验证。
 
 ## 15.3 Scope coupling
 
@@ -1463,6 +1577,8 @@ G_R
 \frac{median(e\mid R\in Q_{top})}{median(e)}.
 \]
 
+使用共同可评价的reference rows / landmarks，不按预测R屏蔽误差。Spearman使用average ranks；top quartile取R排序最高的 \(\lceil n/4\rceil\) 个点，并列按稳定的source/realization/时间索引打破。CI按source utterance cluster bootstrap计算。
+
 QUALIFIED 必须满足：
 
 \[
@@ -1477,7 +1593,11 @@ G_R\ge0.25,
 L_{95}(G_R)>0.
 \]
 
-R-0 仅在 dense evidence 下按 Q95 error eligibility 判定；sparse-only 永远 INELIGIBLE。
+R-A/B/C的判决顺序：满足以上全部条件为QUALIFIED；否则若 \(L_{95}(\rho_R)>-0.30\) 或 \(U_{95}(G_R)<0.25\)，则REJECTED；其它为INCONCLUSIVE。若R或error为常数、median(error)=0，或有效数据不足，使rho/G未定义，则为INCONCLUSIVE并记录原因，不填零或默认通过。数值阈值均引用第7.10节。
+
+R-0不经过Spearman/gain检验，只表示已验证的二值对应支持。它仅在dense reference下评价同一W的independent row-error Q95：\(U_{95}(Q95)\le\texttt{r0.controlled\_q95\_ms}\)时ELIGIBLE并映射为该W的R=QUALIFIED；\(L_{95}(Q95)\)严格大于阈值时INELIGIBLE并映射为REJECTED；跨越阈值则INCONCLUSIVE。此严格Q95上限也适用于REAL dense，不随REAL的W阈值放宽。sparse-only永远INELIGIBLE，作为结构上不适用的候选跳过，不能冒充一次统计失败。
+
+固定W内先核验W及必要strata，再按R-A→R-B→R-C→R-0处理：只有明确REJECTED或结构INELIGIBLE才进入下一R；任何终局INCONCLUSIVE保持sticky。W明确失败则不靠换R挽救。所有适用R明确失败且没有INCONCLUSIVE时，该W/R路线整体REJECTED，方可尝试下一W；W、R及必要strata全部合格才得到W/R candidate QUALIFIED。Q-B使用同一合并规则，不能仅确认W而忽略R。
 
 ### Authenticity-conditioned absolute fidelity
 
@@ -1641,74 +1761,12 @@ LOCALIZER\_SUPPORTED
 ```text
 Stage 2 成功但 Stage 3 失败 → 不进入 Stage 4；
 Stage 3 成功但 Localizer unusable → 不进入 Stage 4；
-二者都成功 → 进入 Stage 4P。
+二者都成功 → 进入 Stage 4D，再进入4P。
 ```
 
 ---
 
-# 19. Stage 4P — Mechanism Power / Precision Lock
-
-这是正式 Stage 4 的必要前置，不是可选 sanity check。
-
-只读：
-
-\[
-D_{\mathrm{mech-dev}}.
-\]
-
-使用与 formal architecture / data unit 相同的 paired metric 结构，估计：
-
-\[
-\hat\sigma_4,\hat\sigma_5,\hat\sigma_6.
-\]
-
-其中 F5 必须基于：
-
-\[
-M5-M3'.
-\]
-
-按第8.6节计算：
-
-\[
-n_{lock}.
-\]
-
-### PASS
-
-若：
-
-\[
-n_{lock}\le\texttt{minimums.mech\_test\_cap},
-\]
-
-则将 exact `n_lock` 写入：
-
-```text
-stage4_power.lock.yaml
-```
-
-并从已 seal 的 `D_mech-test` 预注册池中固定抽取该数量 source identities。
-
-### POWER_INFEASIBLE
-
-若：
-
-\[
-n_{lock}>n_{cap},
-\]
-
-则：
-
-\[
-\boxed{POWER\_INFEASIBLE.}
-\]
-
-不得用 under-powered 300 pairs 强行运行并把 negative result 解释为 null。
-
----
-
-# 20. Stage 4D — M2 / M3′ / M4 / M5 Development
+# 19. Stage 4D — M2 / M3′ / M4 / M5 Development
 
 只读：
 
@@ -1748,6 +1806,70 @@ lambda_CEL。
 ```
 
 M3 native 可训练，但固定为 SECONDARY-DIAGNOSTIC，不参与 F5 formal tuning family。
+
+---
+
+# 20. Stage 4P — Mechanism Power / Precision Lock
+
+这是Stage 4D之后、4L/4T之前的必要步骤。输入为4D已固定的四个模型及mech-dev预测；不得重新调参以降低方差或改变required n。若模型或训练配置发生合法的实施前修改，需重新生成4D预测并重新执行4P，然后才能4L。
+
+只读：
+
+\[
+D_{\mathrm{mech-dev}}.
+\]
+
+使用与 formal architecture / data unit 相同的 paired metric 结构，估计：
+
+\[
+\hat\sigma_4,\hat\sigma_5,\hat\sigma_6.
+\]
+
+其中 F5 必须基于：
+
+\[
+M5-M3'.
+\]
+
+按第8.6节计算：
+
+\[
+n_{lock}.
+\]
+
+### PASS
+
+若：
+
+\[
+n_{lock}\le\texttt{minimums.mech\_test\_cap},
+\]
+
+则将 exact `n_lock` 写入：
+
+```text
+stage4_power.lock.yaml
+```
+
+同时记录输入checkpoint hashes、dev source清单、固定seed IDs、三个方差估计、planning alternative、功效仅对应单项显著性检验的解释及family分配。4L核验这些模型身份与最终mechanism配置完全一致。
+
+并从已 seal 的 `D_mech-test` 预注册池中固定抽取该数量 source identities。
+
+### POWER_INFEASIBLE
+
+若：
+
+\[
+n_{lock}>n_{cap},
+\]
+
+则：
+
+\[
+\boxed{POWER\_INFEASIBLE.}
+\]
+
+不得用 under-powered 300 pairs 强行运行并把 negative result 解释为 null。
 
 ---
 
@@ -1810,7 +1932,7 @@ overall Delta4；
 Delta4_common；
 W-only duration / row fraction；
 M5 vs M2 on W-only region；
-coverage-mediated / accuracy-mediated attribution label。
+共同区域 / 额外覆盖区域的描述性结果及训练支持差异限制。
 ```
 
 该 attribution label 不改变 F4 verdict，但约束论文表述。
@@ -1961,6 +2083,8 @@ AUPRC(M5)-AUPRC(C^\star).
 
 Stage 5 必须在 formal test 解封前检查 expected CI width。若 initial 2000 不足，只能按第7.14节 precision-only 解封预注册 reserve，最多到 `real_formal_cap`。
 
+CI宽度目标及其dev估计/模拟方法须在0B登记、Stage 5解封前落实到样本计划；这些值尚未确定时不得宣称precision gate已通过。若最终PRACTICAL_NULL但同REAL scope的F1–F6已支持，保留其机制证据并按Outcome M交付，不将结果改称CTRL。
+
 SUPPORTED：
 
 \[
@@ -2044,11 +2168,15 @@ N\text{-A}\rightarrow N\text{-B}\rightarrow N\text{-C}.
 1. 固定 W/R；
 2. 按 N route 构造合法 negative bank；
 3. 通过 02 negative contract；
-4. 冻结 bank hash；
-5. 之后才读取 Y_x；
+4. 冻结train/dev bank hashes及适用于test的generator/seed/合法性规则；
+5. 之后才读取对应train/dev Y_x；test bank仅在6L后解封该partition时按固定规则生成，先保存hash再读Y；
 6. 计算 informative gate；
-7. 训练 CS。
+7. 从同一M5起点追加训练CEL控制与CS分支。
 ```
+
+两分支使用同一seed的M5 checkpoint、\(D_{cs-train}\)、paired sampling次序、optimizer、学习率/weight decay、\(\lambda_{CEL}\)、追加optimizer步数、有效batch及checkpoint选择规则。CEL控制继续优化loc+CEL，CS增加selectivity；g=0的pair仍以相同规则参与两侧基础目标，不能只给CS筛选更容易的数据。detector可按合同继续更新，W/R及negative bank不更新。CS新增参数仅在cs-dev和既有search budget内选择，共享配置不为某一侧单独调优。
+
+第7.17节的margin及selectivity尺度用追加训练前的M5在cs-dev上的固定预测计算，先确定尺度再搜索CS参数，不使用test结果，也不以训练后CS输出定义门槛。追加训练步数、优化器配置和有效batch应在本阶段首次训练前登记，未落实时不能启动该阶段。
 
 ## 25.1 N-route exhaustion
 
@@ -2096,6 +2224,10 @@ epsilon_sel_gain。
 scope；
 N route；
 negative-bank hash；
+negative-generator / candidate-count / seed-rule hashes；
+cs-train / cs-dev identity manifests；
+paired CEL/CS start-checkpoint hashes；
+shared optimizer / learning-rate / sampling / additional-update budget；
 delta_W；
 delta_Y_op；
 lambda_sel；
@@ -2121,9 +2253,11 @@ D_{\mathrm{cs-test}}.
 formal comparison：
 
 ```text
-CEL = frozen M5；
-CS-CEL = same frozen M5 + selectivity。
+CEL = 从固定M5 checkpoint完成匹配追加训练的CEL控制；
+CS-CEL = 从同一M5 checkpoint、同数据与更新预算追加selectivity训练的模型。
 ```
+
+两者在同一冻结test bank及同一informative pairs上评价；结论限定于登记的有限negative候选族和当前scope。原始M5可作描述性参照，不替代匹配追加训练的CEL控制。
 
 ## 27.1 Discrimination
 
@@ -2408,7 +2542,7 @@ P0 / P1 / P2 / P3 相互独立；
 Stage 1 只做 premise；
 2D / 2L / 2T 分离；
 3D / 3Q-A / 3Q-B / 3L / 3T 分离；
-4P / 4D / 4L / 4T 分离；
+4D / 4P / 4L / 4T 分离；
 5T 单独；
 6D / 6L / 6T 分离；
 Stage 7 只打包 evidence。
@@ -2568,7 +2702,7 @@ Stage P的 `effective_batch_size: 32` 保持不变。显存不足时可采用mic
 
 频繁读取的数据与缓存优先放在WSL的Linux文件系统；Windows挂载盘可存归档副本，符合[Microsoft的WSL文件存储建议](https://learn.microsoft.com/en-us/windows/wsl/filesystems)。特征按批读取，避免把全量特征和dense W装入12 GiB内存；实际稀疏/带状W可使用保持数学值不变的存储表示。
 
-本地验收时尚未建立Git仓库，环境检查记录脚本内容hash；后续正式实验仍按原协议冻结可核验的代码版本。本节不要求为环境安装提前建立未来阶段的锁。
+2026-10-03本地环境验收时尚未建立Git仓库，故该报告记录脚本内容hash。随后已初始化本目录Git仓库，修订前基线为`710ba11`；后续运行记录当时实际commit及未提交差异，正式实验按原协议冻结可核验的代码版本。本节不要求为环境安装提前建立未来阶段的锁。
 
 ---
 
@@ -2651,7 +2785,8 @@ artifacts/
 | 2 | localizer | localizer verdict |合法终点 LOCALIZER_UNUSABLE / inconclusive |
 | 3Q-A/B | route qualification | W/R route verdict | frozen-order fallback / sticky inconclusive |
 | 3T | operational feasibility | F3 | supported / realization failed / inconclusive |
-| 4P | statistical feasibility | power lock | POWER_INFEASIBLE |
+| 4D | develop fixed comparators and M5 | dev selection + checkpoint identities | stop if required model unavailable |
+| 4P | statistical feasibility after 4D | power lock | POWER_INFEASIBLE |
 | 4T | mechanism necessity | F4/F5/F6 | Novelty Kill Gate |
 | 5 | real-chain strength | real verdict | scope claim |
 | 6 | selectivity | F7 | CS drop / controlled CS / appendix |
@@ -2675,7 +2810,7 @@ artifacts/
 | operational uncertainty robustness | U-OP secondary only |
 | admissible local correspondence-error sensitivity | U-REF / Stage P only |
 | OOD generalization | secondary descriptive only |
-| CS selectivity adds value | F7 |
+| CS selectivity adds value within registered negative family | F7 + matched CEL continuation |
 | authenticity-label-agnostic estimator | structural audit |
 | cross-authenticity fidelity stability | stratified Stage 3 evidence，不等价于 structural audit |
 
@@ -2713,7 +2848,7 @@ F7 PRACTICAL_NULL / INCONCLUSIVE；
 或 NEGATIVE_BANK_UNAVAILABLE。
 ```
 
-允许主张 Strong Real CEL，不再主张 CS extension。
+F7尚未运行时也可保留已成立的Strong Real CEL；没有F7支持时不主张CS extension。
 
 ## Outcome C — Controlled CS-CEL
 
@@ -2854,6 +2989,12 @@ hash / provenance 不可恢复。
 
 只能修复工程 / protocol violation 后从受污染 stage 之前重新开始；污染 evidence 不得保留为 formal evidence。
 
+## Outcome M — REAL Scope Mechanism Supported, Real Strength Not Supported
+
+同一REAL scope的F1–F6全部SUPPORTED，但Stage 5为PRACTICAL_NULL。允许报告该已测试REAL scope内的机制贡献及真实链效应上界；不主张Strong Real CEL，也不能在未独立验证CTRL时改称Controlled Mechanism CEL。
+
+若按第25节另执行了F7，其结果作为该scope及登记negative族内的扩展证据单列，不把Stage 5未支持改写为Strong Real CS-CEL。若Stage 5为INCONCLUSIVE则使用Outcome K并同样保留已有机制证据。已有CTRL结论可按自己的独立证据同时保留，不能跨scope拼接。
+
 ---
 
 # 38. Failure Routing Owner
@@ -2870,6 +3011,7 @@ hash / provenance 不可恢复。
 | J Mechanism Partial Null | Research Scout + Method Architect | novelty downgrade / claim rewrite |
 | K Terminal Inconclusive | Research Planner | 判断是否值得新版本扩大资源，不得在当前 protocol 内循环补样 |
 | L Protocol Invalid | Implementer + Implementation Auditor | 修复真实性 / 工程问题并重跑受污染阶段 |
+| M REAL Mechanism Only | Method Architect + Research Planner | 保留已测scope机制证据，报告真实强度未支持；后续资源决定与原结果分开 |
 
 ---
 
@@ -3079,7 +3221,7 @@ STATE-CLOSED
 /
 POWER-LOCKED
 /
-EXECUTION-READY
+PRE-RUN-CONFIGURATION-REQUIRED
 }
 }
 \]

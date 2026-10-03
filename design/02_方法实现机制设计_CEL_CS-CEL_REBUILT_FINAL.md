@@ -6,7 +6,7 @@
 > 文档层级：**Method Contract / Mathematical Specification / Mechanism Identifiability Contract**  
 > 状态：**REBUILT-FINAL / 01-ALIGNED / CONTROL-CLOSED / METHOD-SPACE-CLOSED**
 
-> 修订：2026-10-03，实施前局部修订 v1.1。保留01原语，补齐M4、矩阵距离、有限negative bank及推理接口，收窄F4解释。实际运行就绪状态以03的数据、配置和阶段记录为准。
+> 修订：2026-10-03，实施前修订 v1.2。保留01原语，明确监督权重与有效batch归约；主指标、网格实例和失败后的新版本研究流程由03落实。实际运行就绪状态以数据、配置和阶段记录为准。
 
 ---
 
@@ -430,6 +430,22 @@ source localization objective：
 (P_\theta(x),Y_x;\Omega_x,\mathcal I_x^{sup}).
 }
 \]
+
+source权重唯一为 \(\Omega_{x,i}=|B_{x,i}\cap\operatorname{supp}(x)|\)，单位为秒，即该输出cell的真实音频时长；不按标签、类别频率或预测加权。padding权重为0，真实尾部不足整格按实际时长保留。\(\sum_{i\in\mathcal I}\Omega_i>0\) 是可计算前提；空支持或非有限输入属于无效样本，不以零损失掩盖。
+
+### 4.1.1 有效batch与梯度累积
+
+一个optimizer更新的有效batch记为 \(\mathcal B\)。先按上式分别计算每个source样本的BCE和Dice，再对全部监督有效样本等权平均：
+
+\[
+\mathcal L_{loc}^{batch}=\frac{1}{|\mathcal B|}\sum_{p\in\mathcal B}\mathcal L_{loc}(p).
+\]
+
+禁止先拼接不同样本的cell再计算一个pooled Dice。相同source出现于不同pair时，按冻结sampling清单中的样本条目计数，不在不同方法间临时去重。
+
+对M2、M3′、M3 native、M4、M5、M6的每个辅助项，先计算各pair自己的R/支持加权标量，再对该项适用的pair集合 \(\mathcal A_t\subseteq\mathcal B\) 等权平均。CS按第17节保留gate乘数：\(\mathcal L_{sel}^{batch}=|\mathcal B|^{-1}\sum_{p\in\mathcal B,\ g_p^{CS}=1}\mathcal L_{sel}(p)\)；分母为完整监督有效batch大小，包含同batch中 \(g=0\) 的pairs，不能改成只按informative数量归一化。\(g=0\)不计算缺失bank的D-minus，仍参加相同loc/CEL基础目标。某辅助项没有适用pair时，不构造该项梯度贡献，日志记录not applicable及适用数0，不输出观测到的零损失；CS另外同时记录完整batch分母和informative数。全部batch均无有效source是实现失败。
+
+micro-batch仅分割计算。每个source损失除以完整有效batch的样本数，每个辅助pair损失除以上述该项在完整有效batch内的分母；不能分别对各micro-batch求均值后机械相加。分母未知时先完成有效性判定或缓存必要统计，再反传；每个有效batch只进行一次optimizer/scheduler更新。该规则适用于CS、末尾batch及所有训练对照。
 
 ## 4.2 M0 — Base Localizer
 
@@ -1413,6 +1429,8 @@ F7比较的CEL控制与CS-CEL必须从同一seed的同一M5 checkpoint出发，�
 ---
 
 # 18. Route Order、Exhaustion 与冻结语义
+
+本节及第21、23节的路线封闭和冻结要求作用于对应method/protocol/evidence版本。当前版本失败按03判决；保持01原语的后续新路线按03第39节主动检索、查重、建立独立版本并验证，不能作为旧版formal rescue，也不受旧版候选名称数量的永久限制。
 
 ## 18.1 Localizer
 

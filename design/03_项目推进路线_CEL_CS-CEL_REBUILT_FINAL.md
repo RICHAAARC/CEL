@@ -6,7 +6,7 @@
 > 文档层级：**Project Execution Manual / Pre-registration Protocol / Evidence SOP**  
 > 状态：**REBUILT-FINAL / 01-02-ALIGNED / PRE-RUN-CONFIGURATION-REQUIRED**
 
-> 修订：2026-10-03，实施前局部修订 v1.1。补齐判决、统计口径及启动实例；正式研究尚未运行。第7.19节的真实数据与模型revision字段落实、对应阶段前置检查完成后，才具备该阶段的运行条件。
+> 修订：2026-10-03，实施前修订 v1.2。落实独立审计发现的指标、网格、统计与判决缺口，并增加失败账本、文献驱动的新路线及版本隔离流程。正式研究尚未运行；真实数据、模型revision和所属阶段配置落实后才具备运行条件。
 
 ---
 
@@ -418,7 +418,7 @@ screen_model:
     type: tcn
     hidden_dim: 256
     input_projection: linear_to_hidden_dim
-    feature_to_output_grid: fixed_physical_time_linear_interpolation
+    feature_to_output_grid: physical_center_linear_with_endpoint_clamp_before_head
     kernel_size: 3
     dilations: [1, 2, 4]
     blocks: 3
@@ -623,7 +623,7 @@ formal:
 \frac{1}{S}\sum_{s=1}^{S}\Delta_{u,s}.
 \]
 
-primary CI / p-value 对 \(\bar\Delta_u\) 进行 source-utterance cluster bootstrap；REAL:MULTI 时额外按 family / platform stratified。
+线性primary差量的CI/p-value对 \(\bar\Delta_u\) 作source-utterance cluster bootstrap；REAL:MULTI按第8.9节的source membership分层，跨family的同一source共用抽样次数。F7 discrimination按第27.1节非线性统计量完整重算，不将其中位数之差替换为上述均值。
 
 seed variability 单独报告：
 
@@ -656,7 +656,7 @@ escalation:
   formal_test_effect_seen_then_expand: forbidden
 ```
 
-任何补样必须来自 Stage 0B 已预注册的 sealed reserve；只能因 minimum / CI-width precision 不足解封，不得根据 effect 方向决定是否补样。
+任何补样必须来自Stage 0B预注册的sealed reserve。正式effect或实际test CI被读取前，可仅根据dev功效/精度规划增加计划样本，最多两轮且受cap限制；正式评价只作一次。解封后只允许预声明、与effect无关的数据损坏/缺失替换，不得按已观察test CI宽度反复补样。qualification阶段亦按此一次评价规则；不同已登记候选可依路线规则使用qualification集合，不能对同一候选边看CI边加样。
 
 ## 7.15 Statistical constants
 
@@ -667,6 +667,19 @@ statistics:
   multiple_comparison: holm
   power_target: 0.80
   planning_alpha_rule: alpha_divided_by_3
+  bootstrap_rng: PCG64
+  bootstrap_seed: 20261003
+  ci_method: percentile
+  quantile_method: linear_type7
+  p_method: centered_bootstrap_error
+  undefined_replicate_policy: inconclusive_no_drop_no_redraw
+
+precision:
+  stage4_effect_halfwidth_max: 0.005
+  stage5_effect_halfwidth_max: 0.005
+  stage6_localization_halfwidth_max: 0.0025
+  stage6_selectivity_halfwidth_rule: 0.5 * epsilon_sel_gain
+  guardrail_halfwidth_rule: 0.5 * corresponding_tolerance
 ```
 
 Stage 4 power planning 使用保守：
@@ -686,7 +699,13 @@ guardrails:
   fully_manipulated_coverage:
     absolute_drop_floor: 0.01
     relative_drop_fraction: 0.10
+  min_source_per_subset: 100
+  max_source_per_subset: 500
+  prediction_threshold: 0.50
+  segment_iou_match_min: 0.50
 ```
+
+保护性检查的每个子集最低100个独立source，适用于各正式评价阶段；不能用informative pair数抵扣。阈值化、时长及空集合规则见第8.7、28节。新增最低量用于独立评价三类退化风险，不替代primary的更高样本量要求。
 
 ## 7.17 CS selectivity scaling
 
@@ -697,7 +716,11 @@ cs_selectivity:
   fallback_rule: 0.01 * median_nonzero_D_scale
 ```
 
-两者只在 `D_cs-dev` 计算并在 Stage 6L 冻结。
+两者只使用追加训练前固定M5在 `D_cs-dev` 的预测，在CS参数搜索前计算并于Stage6L冻结。采用与第27.1节相同的mixed-partial informative eligibility、source/family/realization权重及固定seed清单；不能按M5 gap大小选pair。
+
+每个seed先独立计算 \(z=D^-_{M5}-D^+_{M5}\) 的weighted IQR。分位数唯一采用加权inverse-CDF：合并相同值、递增累积归一权重，首次累计达到或超过q的值为Q_w(q)；IQR_s=Q_w(.75)-Q_w(.25)。先对各seed的IQR等权平均，再乘0.10，同时得到m与epsilon_sel_gain；禁止先pool seeds再算IQR。
+
+若平均IQR严格为0，fallback的D_scale明确取这些固定pairs上全部seed的D+及D-（每个seed等权、每对正负项各占一半，第(seed,u,f,r,+/−)项初始权重为 \(w_{ufr}/(2S)\)）；仅保留严格大于0的有限D值后全局重新归一，按第27.1节的weighted-median规则计算尺度，再乘0.01。没有正D值、无informative pair或有必须值缺失时，尺度不可识别，记录F7=INCONCLUSIVE、reason=CS_SCALE_UNIDENTIFIABLE；不启动依赖m的CS训练、不计算零precision目标；不得以m=0或epsilon=0继续、不得为取得非零尺度按detector结果补换bank。该诊断不否定先前CEL，后续新路线遵循第39节。上述两个乘数仍引用本节registry。
 
 ## 7.18 Secondary metric registry
 
@@ -794,6 +817,17 @@ screen_instance:
 5. P1在source清单上训练；P2/P3所有变体共用按source及family等权的预先固定pooled pair清单，不为每个family另建一套28-run模型矩阵。micro-batch和累积可按显存调整，但有效batch、loss归约及optimizer步数按第7.2和32.5节保持一致。SmoothL1的beta取第7.1节。
 6. source/target特征分别缓存，key按第32.1节。首次获取模型时将远端revision解析为commit SHA并记录文件hash；不能以可变的`main`充当锁定revision。训练集规模和时长分布由实际数据盘点填写，不虚构已满足下限。
 
+### 7.19.1 Stage P 特征与输出时间网格实例
+
+16 kHz输入的第n个样本登记于时间n/16000秒；输出cell为 `[i*0.02, min((i+1)*0.02,T))`，时间中心取该实际区间中点，最后不足整格仍为真实支持。WavLM卷积前端的局部输入支持宽度为400 samples（不表示最终contextual token仅依赖这400个样本）、步长320 samples；第j个native特征的时间中心为 `(320*j+199.5)/16000` 秒，长度为 `floor((N-400)/320)+1`。模型revision的卷积配置必须与该实例一致，否则先修订并冻结实例，不能仅按长度缩放时间。
+
+在输入linear projection及TCN之前，冻结的native backbone特征按物理中心线性插值到完整output grid；超出首/尾native中心但仍在真实音频内的cell固定夹持到最近端点特征。该端点延拓只属于localizer输入适配，不构造额外音频、不读取标签，不扩展W的对应支持；Grid Adapter与M4自身的禁止外推合同保持不变。无native特征为无效输入。TCN的3个block各使用一个stride=1、kernel=3、对应dilation的Conv1d，再GELU及dropout；每层两侧padding=dilation保持输出长度，无额外归一化、残差或第二卷积。padding位置在每层后清零；最终逐cell linear→sigmoid。所有模型共用该实例。
+
+因此canonical pre-logit H已位于output grid，Stage P的M4取Pi=identity。监督mask只排除batch padding，真实首尾格均保留。native feature提取逐条真实长度进行，禁止把batch-fill算进真实尾部；较长音频先按第7.19节固定窗口处理，再恢复原时间坐标。
+
+验收例：N=160000时native长度499、output长度500、有效时长10秒；N=160080时native长度500、output长度501，最后格时长5 ms、中心10002.5 ms，全部501格属于真实支持。两例均检查时间原点、首尾夹持及padding隔离。配置依据：[Microsoft WavLM配置](https://huggingface.co/microsoft/wavlm-base-plus/blob/main/config.json)；运行时保存实际revision与配置hash。
+
+
 ---
 
 # 8. Global Statistical Rules
@@ -820,7 +854,7 @@ minimum 未满足时不得输出 SUPPORTED、PRACTICAL_NULL、PREMISE_REFUTED、
 
 F3、Stage 4、Stage 5、Stage 6 在读取 scientific effect verdict 前必须满足预注册 CI-width / power 条件。
 
-若 precision 不足，只允许按第7.14节解封预注册 reserve；达到最大轮次仍不足则：
+若dev规划的precision不足，只允许在effect解封前按第7.14节扩充预注册计划；达到最大轮次仍不可行则：
 
 ```text
 PRECISION_INFEASIBLE
@@ -828,7 +862,7 @@ PRECISION_INFEASIBLE
 POWER_INFEASIBLE
 ```
 
-并进入合法终点。
+并进入合法终点。实际formal CI宽度超出已冻结门槛时为终局INCONCLUSIVE，保留区间和失败原因，不把规划通过当作实际precision已通过。
 
 ## 8.3 Practical-null discipline
 
@@ -972,35 +1006,29 @@ n_{lock}>n_{cap},
 
 ## 8.7 Canonical primary metric
 
-只对 mixed-partial utterance：
+primary唯一采用 **duration-weighted soft-occupancy grouped step AP**，本文继续记为temporal AUPRC。Y保持01的分数occupancy语义，不以0.5二值化后计算主指标；不采用梯形面积。AP与梯形PR面积并非同一算法，常规AP接口也不直接接受连续标签，参见[scikit-learn定义](https://scikit-learn.org/stable/modules/generated/sklearn.metrics.average_precision_score.html)。下面公式是本项目针对occupancy的明确操作性定义。
+
+对同一音频realization的真实、预声明可评价cells，令 \(w_i\) 为实际cell秒数，\(a_i=w_iY_i\)、\(b_i=w_i(1-Y_i)\)。只在 \(A=\sum_i a_i>0\) 且 \(B=\sum_i b_i>0\) 时计算primary。按预测分数从高到低将**完全相同的分数整体分组**，不得按标签拆分ties，不加jitter或近似合并；累计使用float64，所有Y/P须有限且属于[0,1]。到第g个分组为止：
 
 \[
-0<\sum_kY_{u,k}<L_u
+T_g=\sum_{i:P_i\ge q_g}a_i,\quad F_g=\sum_{i:P_i\ge q_g}b_i,\quad
+\pi_g=\frac{T_g}{T_g+F_g},\quad r_g=\frac{T_g}{A},
+\qquad AP=\sum_g(r_g-r_{g-1})\pi_g,\quad r_0=0.
 \]
 
-计算 temporal AUPRC，再 macro average：
+常数预测的no-skill参照为 \(A/(A+B)\)，与同一时长和soft标签定义一致；这不是有限样本随机排序AP的精确期望。Y为0/1时该公式退化为相同时长权重的grouped step AP。全真/全假音频的primary为not applicable，分别进入FPR/coverage保护性检查；缺失预测、非有限值或真实cell被静默删除属于实现失败，不能以0/1填入。
 
-\[
-\boxed{
-AUPRC_{partial}
-=
-\frac{1}{|\mathcal U_{partial}|}
-\sum_{u\in\mathcal U_{partial}}AUPRC_u.
-}
-\]
+同一母source切出的窗口先恢复到各自realization的物理时间轴并汇集其所有预声明窗口cells，再计算该realization的AP，不把窗口当独立样本、不对窗口AP简单平均。所有窗口共用固定切窗及不足minimum-window尾部的记录规则。每个source内部先在同family的可评价realizations间等权平均，再在登记的family间等权平均，最后对source等权macro average。所需family无可评价realization时记该source不适用并报告覆盖；source/family清单不能随模型改变。多seed先按第7.12节汇总paired差量；no-skill使用完全相同的层级、支持和分母。
 
-no-skill baseline：
+该指标定义适用于P1–P3、Localizer、F4–F7、Stage5及clean regression。boundary用的0.5阈值不能回流改变primary。最低量按独立母source计；多个family或窗口不增加独立样本数。
 
-\[
-\boxed{
-AUPRC_{noskill}
-=
-\frac{1}{|\mathcal U_{partial}|}
-\sum_u\frac{1}{L_u}\sum_kY_{u,k}.
-}
-\]
+### 8.7.1 阈值化定位与保护性指标
 
-Secondary localization metrics：Segment F1、Segment mIoU、Boundary MAE / P90、bona-fide temporal FPR、fully-manipulated coverage。
+预测 \(P\ge\texttt{guardrails.prediction_threshold}\)、GT occupancy \(Y\ge\texttt{premise.occupancy_boundary_threshold}\) 分别形成最大连续区间，不跨padding、未观察支持或窗口间隙连段；阈值和后处理对全部模型/seed相同，不作test调优。Segment F1按IoU不低于第7.16节阈值的最大基数一一匹配，再以最大总IoU、时间索引字典序打破并列，计 \(2TP/(|A|+|B|)\)。只有一侧无区间时为0；两侧皆无时不适用并报告数量。
+
+Boundary MAE/P90使用同polarity、保持顺序、最大基数后最小总距离的匹配，ties按时间索引；每个未匹配GT或预测边界记该realization的可观察时长为误差，不能因漏检删掉该样本。真实区间内真假切换才是边界，padding/未知支持边缘不算。匹配误差和未匹配惩罚一起求MAE/P90；全部无边界时不适用。Segment mIoU沿用第15.2节公式。指标先逐realization计算，再按上述source/family层级汇总；正式CI重采样source。局部指标不适用数及最低量单列，不能借primary样本量宣称其它指标已够量。
+
+Bona-fide FPR是全真音频上预测为假的真实时长比例；fully-manipulated coverage是全假音频上预测为假的真实时长比例。两者不要求informative gate，沿用source/family汇总和同一阈值。全真/全假指原始provenance在评价支持上分别全0/全1，不能将mixed-partial按平均标签改归类。
 
 ## 8.8 F4 mandatory decomposition
 
@@ -1016,6 +1044,30 @@ W-only localization behavior。
 ```
 
 按02第12节作描述性区域分解：common-support上的正收益说明收益在共同区域仍可观察到；W-only集中收益说明收益主要位于额外覆盖区域。两模型训练支持可能不同，不能据此排除训练coverage的间接效应，也不能单独主张对齐精度的因果贡献。
+
+## 8.9 唯一重采样、CI与p值实现
+
+在固定source registry上，按其预登记family/platform membership signature建立互不重叠的strata；每层有放回抽取原数量的parent sources。同一source的bootstrap multiplicity由所有方法、seeds、family、realization及保护性子集共用，不独立抽seed、窗口、frame或同一source的另一个family。每次抽样重算该指标规定的聚合，使用重复source的抽样次数作为权重；不改变冻结的family汇总规则。两模型先在相同评价清单形成配对，预测失败不是改用不同分母的理由。
+
+使用第7.15节的RNG、seed与10000次重采样；每个有定义的统计量T，默认双侧95%区间为 \([Q_{.025}(T^*),Q_{.975}(T^*)]\)，单侧95%上/下界分别为 \(Q_{.95}(T^*)\)、\(Q_{.05}(T^*)\)，quantile使用linear/type-7。未标one-sided的L95/U95统一指双侧端点；半宽为(U-L)/2。重采样中统计量无定义时记录原因为INCONCLUSIVE，不静默丢弃或重抽；实际minimum、eligibility与coverage先于推断。
+
+F4–F6令 \(E_b=T_b^*-\hat T\)。检验 \(H_0:T\le0\) 的support原始p值与检验 \(H_0:T\ge\epsilon_{main}\) 的practical-null原始p值分别固定为：
+
+\[
+p_{sup}=\frac{1+\sum_{b=1}^{B}\mathbf1[E_b\ge\hat T]}{B+1},\qquad
+p_{null}=\frac{1+\sum_{b=1}^{B}\mathbf1[E_b\le\hat T-\epsilon_{main}]}{B+1}.
+\]
+
+尾部ties计入，执行plus-one校正；两组各对固定三项作Holm，排序ties按F4/F5/F6顺序，adj-p按累积最大值并截断至1。percentile CI与centered-error p不宣称精确互为反演，仍按第8.4–8.5节同时核验CI和校正p条件。F7、reference及其它非线性指标直接重算其完整统计量来取CI，不套用F4–F6的差量均值。
+
+这些是条件于固定训练seeds的近似source-population推断，不是有限样本精确检验，也不保证多个阶段/指标联合95%覆盖。退化bootstrap分布、罕见事件和过小strata必须报告；零宽区间不意味着总体无不确定性。实现参考：[SciPy paired bootstrap与区间定义](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.bootstrap.html)；实现必须显式指定本文方法，不能使用库的其它默认CI。
+
+## 8.10 精度规划与一次正式评价
+
+Stage3保持第7.9节precision阈值；Stage4/5/6与各guardrail使用第7.15节新增半宽目标。相同固定模型的dev source-bootstrap半宽为h_dev、独立source数n_dev时，使用 \(n_{precision}=\lceil n_{dev}(h_{dev}/h_{max})^2\rceil\) 作规划近似，与该阶段最低量、power要求和family配额共同取最大；dev退化/不可估计时不能用h_dev=0宣称所需样本为0，应以预登记最大计划样本或新独立dev证据完成规划。上述平方根缩放不是对formal宽度的保证。
+
+Stage4第8.6节n_lock还须覆盖三项effect的precision需求；Stage5沿用2000–3000 cap；Stage6 informative沿用100–500 cap。三类guardrail各至少100个source、每类最多500个source，分别规划并预封存；一类样本不能替另一类凑数。样本不足或计划超cap即停止该阶段并记录INCONCLUSIVE/PRECISION_INFEASIBLE。读到正式结果后，实际precision不足只报告终局INCONCLUSIVE，不按结果反复扩样。
+
 
 ---
 
@@ -1451,7 +1503,7 @@ lambda_BCE / lambda_Dice；
 checkpoint selection；
 02 canonical feature tap 的 exact module path；
 tap shape hash；
-formal seeds。
+formal seeds及各seed被选M0 checkpoint hash。
 ```
 
 然后才解封 `D_loc-test`。
@@ -1464,11 +1516,19 @@ formal seeds。
 G_{loc}=AUPRC_{partial}-AUPRC_{noskill}.
 \]
 
-LOCALIZER_SUPPORTED 需同时满足 formal thresholds。
+先检查第7.11节minimum及三项指标的可估计性；G_loc、Segment F1和Boundary MAE各自的可评价mixed-partial source数均须达到loc_test_mixed_partial，不能相互抵扣。以第8.9节CI，SUPPORTED当且仅当：
 
-LOCALIZER_UNUSABLE 为明确达到 refutation thresholds。
+\[
+L_{95}(G_{loc})\ge0.10\ \land\ L_{95}(SegmentF1)\ge0.40\ \land\ U_{95}(BoundaryMAE)\le250\text{ ms}.
+\]
 
-其它为 LOCALIZER_INCONCLUSIVE。
+UNUSABLE当且仅当至少一项明确失败：
+
+\[
+U_{95}(G_{loc})\le0.05\ \lor\ U_{95}(SegmentF1)\le0.30\ \lor\ L_{95}(BoundaryMAE)\ge300\text{ ms}.
+\]
+
+上式数值引用第7.8节，不维护第二份配置。其余（含必要指标缺失、最低量不足）为LOCALIZER_INCONCLUSIVE。不存在有效性缺口时先检查SUPPORTED，再检查UNUSABLE；两组条件因不同门槛不会同时成立。Stage2D的route选择仍使用固定dev点估计与dev thresholds；没有合格route且指标不可估计时为LOCALIZER_INCONCLUSIVE，不能当作全部明确失败。
 
 Formal test 后不得切换 L route。
 
@@ -1560,7 +1620,7 @@ P90 CI half-width <= corr_precision.p90_ci_halfwidth_max_ms；
 Coverage CI half-width <= corr_precision.coverage_ci_halfwidth_max。
 ```
 
-若仅 precision 不足，允许解封预注册 reserve；达到 cap 仍不足则 route INCONCLUSIVE。
+样本/precision计划按第8.10节在读取该候选qualification结果前固定。评价后precision不足为该route的INCONCLUSIVE，不按同一结果反复解封reserve。
 
 ### Reliability decision
 
@@ -1597,7 +1657,9 @@ R-A/B/C的判决顺序：满足以上全部条件为QUALIFIED；否则若 \(L_{9
 
 R-0不经过Spearman/gain检验，只表示已验证的二值对应支持。它仅在dense reference下评价同一W的independent row-error Q95：\(U_{95}(Q95)\le\texttt{r0.controlled\_q95\_ms}\)时ELIGIBLE并映射为该W的R=QUALIFIED；\(L_{95}(Q95)\)严格大于阈值时INELIGIBLE并映射为REJECTED；跨越阈值则INCONCLUSIVE。此严格Q95上限也适用于REAL dense，不随REAL的W阈值放宽。sparse-only永远INELIGIBLE，作为结构上不适用的候选跳过，不能冒充一次统计失败。
 
-固定W内先核验W及必要strata，再按R-A→R-B→R-C→R-0处理：只有明确REJECTED或结构INELIGIBLE才进入下一R；任何终局INCONCLUSIVE保持sticky。W明确失败则不靠换R挽救。所有适用R明确失败且没有INCONCLUSIVE时，该W/R路线整体REJECTED，方可尝试下一W；W、R及必要strata全部合格才得到W/R candidate QUALIFIED。Q-B使用同一合并规则，不能仅确认W而忽略R。
+仅有以下预登记例外：若independent error恒定，或median(error)=0导致gain无定义，可检查同一W的R-0；必须dense reference、W整体及全部mandatory strata的minimum/precision/absolute fidelity均合格，且整体与每个mandatory stratum的 \(U_{95}(Q95)\le60\text{ ms}\)。通过时选择R-0并记录reason `RANK_UNIDENTIFIABLE_HIGH_FIDELITY`，不将R-A/B/C无定义的值填成通过。仅R恒定而error非退化、数据/precision不足或普通CI跨阈值不能触发该出口；R-0未通过则保持原INCONCLUSIVE。Q-B及Corr-Test只能验证已选定的同一W/R-0，独立重复相同资格检查，不在test改R。
+
+固定W内先核验W及必要strata，再按R-A→R-B→R-C→R-0处理（仅上述高保真退化例外可直达R-0）：只有明确REJECTED或结构INELIGIBLE才进入下一R；任何终局INCONCLUSIVE保持sticky。W明确失败则不靠换R挽救。所有适用R明确失败且没有INCONCLUSIVE时，该W/R路线整体REJECTED，方可尝试下一W；W、R及必要strata全部合格才得到W/R candidate QUALIFIED。Q-B使用同一合并规则，不能仅确认W而忽略R。
 
 ### Authenticity-conditioned absolute fidelity
 
@@ -1652,8 +1714,8 @@ REJECTED_EXTERNAL
 INCONCLUSIVE 是 sticky：
 
 ```text
-先按 precision-only reserve escalation；
-达到 cap 仍 INCONCLUSIVE → F3=INCONCLUSIVE；
+结果读取前可按dev precision规划使用reserve；
+读取Q-B后仍 INCONCLUSIVE → F3=INCONCLUSIVE；
 不得静默跳到下一 route。
 ```
 
@@ -1754,7 +1816,7 @@ LOCALIZER\_SUPPORTED
 }
 \]
 
-才允许进入 Stage 4。
+才允许进入 Stage4；从Stage4进入Stage5/6还须满足第28.4节M5三类保护性检查。
 
 因此：
 
@@ -2047,7 +2109,7 @@ F1\text{--}F6=SUPPORTED
 }
 \]
 
-且全部属于同一 REAL target scope。
+且全部属于同一REAL target scope，Stage4的M5三类保护性检查均PASS。
 
 否则 real evaluation 只能是 exploratory transfer。
 
@@ -2081,9 +2143,7 @@ M3 native 仍为 secondary，不进入 primary comparator selection。
 AUPRC(M5)-AUPRC(C^\star).
 \]
 
-Stage 5 必须在 formal test 解封前检查 expected CI width。若 initial 2000 不足，只能按第7.14节 precision-only 解封预注册 reserve，最多到 `real_formal_cap`。
-
-CI宽度目标及其dev估计/模拟方法须在0B登记、Stage 5解封前落实到样本计划；这些值尚未确定时不得宣称precision gate已通过。若最终PRACTICAL_NULL但同REAL scope的F1–F6已支持，保留其机制证据并按Outcome M交付，不将结果改称CTRL。
+Stage5在formal test解封前按第7.15、8.10节规划expected CI width；initial 2000不足时，在读取test效果前使用预注册reserve，最多到real_formal_cap，固定样本后只评价一次。实际precision不足为终局INCONCLUSIVE。primary verdict按以下公式，最终Stage5 verdict再按第28.4节合并三类保护性检查；只有保护性检查通过时，primary PRACTICAL_NULL才按Outcome M交付，保留原REAL机制证据。
 
 SUPPORTED：
 
@@ -2154,7 +2214,7 @@ F1\text{--}F6=SUPPORTED
 }
 \]
 
-后进入。
+且Stage4的M5三类保护性检查PASS后进入。
 
 negative route：
 
@@ -2235,7 +2295,9 @@ epsilon_cs；
 formal seeds；
 guardrails；
 informative-pair rule；
-exact informative-pair count plan。
+exact informative source-count plan；
+clean/BF/fullfake未筛选子集identity manifests及各自minimum/precision计划；
+M0 reference checkpoint hashes及dev-derived guardrail margins。
 ```
 
 然后才解封：
@@ -2257,21 +2319,21 @@ CEL = 从固定M5 checkpoint完成匹配追加训练的CEL控制；
 CS-CEL = 从同一M5 checkpoint、同数据与更新预算追加selectivity训练的模型。
 ```
 
-两者在同一冻结test bank及同一informative pairs上评价；结论限定于登记的有限negative候选族和当前scope。原始M5可作描述性参照，不替代匹配追加训练的CEL控制。
+两个primary components在同一冻结test bank及同一mixed-partial informative pairs上评价；结论限定于登记的有限negative候选族和当前scope。三类guardrail分别在未经过informative筛选的独立登记子集上评价，见第28.4节。原始M5可作描述性参照，不替代匹配追加训练的CEL控制。
 
 ## 27.1 Discrimination
 
-定义：
+定义 \(z_{ufrs}^{M}=D_M^-(u,f,r,s)-D_M^+(u,f,r,s)\)。固定informative清单中共有U个parent sources，每个source有F_u个合格family、每个source/family有R_uf个合格realizations；pair权重为 \(w_{ufr}=1/(U F_u R_{uf})\)。清单和权重对两模型及所有seed一致；各family分别报告样本数和coverage，登记必要family无合格source时为INCONCLUSIVE。
 
 \[
-S(M)
-=
-\operatorname{median}_p[D_M^-(p)-D_M^+(p)].
-\]
-
-\[
+S_s(M)=\operatorname{wmedian}_{u,f,r}(z_{ufrs}^{M};w_{ufr}),\quad
+S(M)=\frac1S\sum_{s=1}^S S_s(M),\quad
 \Gamma_{sel}=S(CS)-S(CEL).
 \]
+
+Weighted median按值合并ties并递增累积权重；第一次超过0.5取该值，恰好0.5取该值与下一不同值的中点。等权时恢复通常样本中位数。先每seed算两个模型各自中位数，再作差并平均seed；禁止替换为逐pair差量的均值/中位数或先平均seed再取中位数。
+
+每次第8.9节source-cluster bootstrap保留两模型和全部seed，按抽到的source multiplicity重新归一上述权重并重算S_s、S及Gamma。minimum按独立source而非窗口、realization数计算。Margin/epsilon_sel_gain仍由追加训练前固定M5的cs-dev预测计算，在6L冻结；重采样不重算这些门槛。
 
 SUPPORTED：
 
@@ -2330,6 +2392,7 @@ U_{95}^{one-sided}(\Delta_7)<\epsilon_{cs}.
 ```text
 Discrimination SUPPORTED；
 Localization SUPPORTED；
+clean mixed-partial guardrail PASS；
 bona-fide guardrail PASS；
 fully-manipulated guardrail PASS。
 ```
@@ -2340,7 +2403,7 @@ fully-manipulated guardrail PASS。
 \boxed{F7=SUPPORTED.}
 \]
 
-任一 component PRACTICAL_NULL 或 guardrail FAIL：
+任一component PRACTICAL_NULL或三类guardrail中任一FAIL（分别记录PRIMARY_NULL或GUARDRAIL_FAIL，后者不冒称primary的效应上界）：
 
 \[
 \boxed{F7=PRACTICAL_NULL.}
@@ -2411,6 +2474,8 @@ FAIL：
 L_{95}(\Delta FPR)>\epsilon_{FPR}.
 \]
 
+其它为INCONCLUSIVE。
+
 ## 28.3 Fully-manipulated coverage
 
 \[
@@ -2439,6 +2504,24 @@ FAIL：
 \[
 L_{95}(\Delta Coverage)>\epsilon_{allfake}.
 \]
+
+其它为INCONCLUSIVE。
+
+## 28.4 评价子集、reference与阶段合并
+
+三项分别使用clean mixed-partial、bona-fide、fully-manipulated子集，全部与训练/dev身份隔离，在相应test seal中预登记，不按CS gate、negative-bank可用性或模型预测过滤。clean与informative可共享parent identity，其bootstrap multiplicity必须相同；纯真/纯假不需negative bank。三类各遵循第7.16、8.10节minimum/precision/cap，缺类或量不足为该guardrail INCONCLUSIVE，不默认PASS。CS的informative minimum不能抵扣这些子集。
+
+M0是该版本Stage2L锁定、对应seed的source监督localizer checkpoint，整个版本不为某个方法另行重训。Stage4/5检查M5对M0，Stage6检查CS对同一M0；匹配追加训练CEL仍是F7 primary comparator。Bona-fide与fullfake容忍量由相应stage dev上固定M0计算，并在4L、Stage5解封前的plan、6L分别冻结，不用test计算门槛。第28.1节epsilon_clean引用第7.16节的clean容忍量。
+
+组合guardrail：任一FAIL则FAIL；否则任一INCONCLUSIVE则INCONCLUSIVE；全部PASS才PASS。三项CI只代表各自marginal近似区间，不宣称联合95%覆盖。Stage4–6的主效果、guardrail状态、合并状态分别保存，不互相覆盖。
+
+| 阶段 | 主效果之外的必需条件 | 未通过的结果与推进 |
+|---|---|---|
+| 4T | M5三类guardrail PASS | FAIL记Outcome N；INCONCLUSIVE记Outcome K；保留F4–F6效果判定，停止当前版本5/6，不主张可用CEL方法 |
+| 5T | M5三类guardrail PASS | FAIL记Outcome N，Stage5合并verdict=INCONCLUSIVE并带GUARDRAIL_FAIL原因；INCONCLUSIVE记K；保留primary结果，不形成Strong Real CEL |
+| 6T | CS三类guardrail PASS | FAIL使F7=PRACTICAL_NULL且reason=GUARDRAIL_FAIL；INCONCLUSIVE使F7=INCONCLUSIVE（若primary已明确NULL则仍NULL）；保留此前成立的CEL |
+
+最低量/precision不足优先于对应项判定。Stage4若主效果已明确NULL仍记J；若主效果支持而guardrail失败记N，不把保护性失败当作机制效应小于epsilon。Stage5在guardrails PASS后才采用第24节primary/multi-family合并verdict；失败时不以primary上界解释guardrail。Stage6沿用第27.3节“明确NULL/FAIL优先，其余不确定”的组合。Outcome K/N可同时列原因，已成立的其它scope和旧版本证据保留各自身份。
 
 ---
 
@@ -2686,7 +2769,7 @@ artifacts/environment/local_environment.json
 
 ## 32.5 本地显存、缓存与路径安排
 
-Stage P的 `effective_batch_size: 32` 保持不变。显存不足时可采用micro-batch与梯度累积，在单卡下使每次optimizer更新对应32个有效训练样本；1500 / 1000训练步仍按optimizer更新计。累积时保持既定loss归约，尤其不得把跨样本Dice改成不同的逐micro-batch目标。优先在optimizer更新边界保存checkpoint。
+Stage P的 `effective_batch_size: 32` 保持不变。显存不足时可采用micro-batch与梯度累积，使每次optimizer更新对应32个有效训练样本；1500 / 1000训练步按optimizer更新计。BCE/Dice逐样本计算后按完整有效batch平均，辅助项按02第4.1.1节各自分母归约；禁止改成pooled Dice或独立micro-batch均值。训练采样跨epoch持续组成32个条目的完整batch，不执行不足32的末尾optimizer更新。优先在optimizer更新边界保存checkpoint。
 
 建议目录：
 
@@ -2710,6 +2793,11 @@ Stage P的 `effective_batch_size: 32` 保持不变。显存不足时可采用mic
 
 ```json
 {
+  "research_version": "...",
+  "route_fingerprint": "...",
+  "parent_failure_event_ids": [],
+  "experiment_plan_ref": "...",
+  "budget_record_ref": "...",
   "git_commit": "...",
   "primitive_hash": "...",
   "method_contract_hash": "...",
@@ -2749,6 +2837,7 @@ Stage P的 `effective_batch_size: 32` 保持不变。显存不足时可采用mic
 
 ```text
 artifacts/
+├── versions/              # 后续版本隔离的运行产物与协议快照引用
 ├── stageP_screen/
 │   ├── P0/
 │   ├── P1/
@@ -2818,7 +2907,7 @@ artifacts/
 
 # 37. 合法项目终点
 
-本节覆盖所有可能的 terminal states，不允许出现“无法继续但没有 Outcome”。
+本节终点约束对应research version、scope及formal track。先保存原verdict、证据和claim边界；已授权研究任务随后按第39节主动诊断、检索并探索新路线。版本终止不等于整个研究任务永久停止，也不能将旧失败改写为成功。
 
 ## Outcome A — Strong Real CS-CEL
 
@@ -2826,9 +2915,9 @@ artifacts/
 
 ```text
 F1–F6 SUPPORTED；
-Stage 5 SUPPORTED；
+Stage5合并verdict SUPPORTED；
 F7 SUPPORTED；
-guardrails PASS。
+Stage4/5的M5及Stage6的CS三类guardrails均PASS。
 ```
 
 允许主张：
@@ -2843,7 +2932,7 @@ guardrails PASS。
 
 ```text
 F1–F6 SUPPORTED；
-Stage 5 SUPPORTED；
+Stage4/5的M5三类guardrails均PASS，Stage5合并verdict SUPPORTED；
 F7 PRACTICAL_NULL / INCONCLUSIVE；
 或 NEGATIVE_BANK_UNAVAILABLE。
 ```
@@ -2855,8 +2944,8 @@ F7尚未运行时也可保留已成立的Strong Real CEL；没有F7支持时不�
 CTRL scope：
 
 ```text
-F1–F6 SUPPORTED；
-F7 SUPPORTED；
+F1–F6 SUPPORTED且Stage4的M5三类guardrails PASS；
+F7 SUPPORTED（含CS三类guardrails PASS）；
 real scope 不足、未支持或仅 exploratory。
 ```
 
@@ -2867,7 +2956,7 @@ real scope 不足、未支持或仅 exploratory。
 CTRL scope：
 
 ```text
-F1–F6 SUPPORTED；
+F1–F6 SUPPORTED且Stage4的M5三类guardrails PASS；
 F7 未支持或未运行；
 real scope insufficient / inconclusive / exploratory。
 ```
@@ -2878,7 +2967,7 @@ real scope insufficient / inconclusive / exploratory。
 SCREEN_NONPROMISING。
 ```
 
-停止 full formal CEL engineering。不是 F5 formal refutation。
+停止当前版本的full formal CEL engineering；不是F5 formal refutation。研究任务按第39节转入失败分析与有依据的新版本探索。
 
 ## Outcome F — Premise Refuted
 
@@ -2987,19 +3076,23 @@ hash / provenance 不可恢复。
 \boxed{INVALID\_IMPLEMENTATION}.
 \]
 
-只能修复工程 / protocol violation 后从受污染 stage 之前重新开始；污染 evidence 不得保留为 formal evidence。
+只能修复工程/protocol violation后从受污染stage之前恢复；污染evidence不得保留为formal evidence。若测试信息已经暴露，修复代码不能使该测试重新独立，须按第39.7节恢复数据隔离或建立新版本。
 
 ## Outcome M — REAL Scope Mechanism Supported, Real Strength Not Supported
 
-同一REAL scope的F1–F6全部SUPPORTED，但Stage 5为PRACTICAL_NULL。允许报告该已测试REAL scope内的机制贡献及真实链效应上界；不主张Strong Real CEL，也不能在未独立验证CTRL时改称Controlled Mechanism CEL。
+同一REAL scope的F1–F6全部SUPPORTED且Stage4保护性检查通过，但Stage5 primary为PRACTICAL_NULL、Stage5保护性检查亦通过。允许报告该已测试REAL scope内的机制贡献及真实链效应上界；不主张Strong Real CEL，也不能在未独立验证CTRL时改称Controlled Mechanism CEL。
 
 若按第25节另执行了F7，其结果作为该scope及登记negative族内的扩展证据单列，不把Stage 5未支持改写为Strong Real CS-CEL。若Stage 5为INCONCLUSIVE则使用Outcome K并同样保留已有机制证据。已有CTRL结论可按自己的独立证据同时保留，不能跨scope拼接。
 
 ---
 
+## Outcome N — Guardrail Not Satisfied
+
+当前版本Stage4或Stage5的必要guardrail明确FAIL。保留已得到的主效应、scope及失败维度，停止相应可用方法/Strong Real主张；不把该状态冒充PRACTICAL_NULL效应上界。三类guardrail有INCONCLUSIVE而无FAIL时使用K。CS阶段的guardrail失败按F7记录并保留先前合法CEL结论。
+
 # 38. Failure Routing Owner
 
-为防止失败后职责不明，所有终点绑定默认 handoff owner。
+为防止失败后职责不明，所有终点绑定默认owner。owner负责完成动作：Research Scout核验文献与反证，Method Architect提出保持01的新假设，Research Planner选择有限候选与判别实验，Implementer执行授权内实现，Implementation Auditor核对失败身份、路线差异及证据隔离。职责可由同一协调者分阶段承担；必要独立复核按04执行。
 
 | Outcome | 默认 owner | 下一动作 |
 |---|---|---|
@@ -3011,7 +3104,8 @@ hash / provenance 不可恢复。
 | J Mechanism Partial Null | Research Scout + Method Architect | novelty downgrade / claim rewrite |
 | K Terminal Inconclusive | Research Planner | 判断是否值得新版本扩大资源，不得在当前 protocol 内循环补样 |
 | L Protocol Invalid | Implementer + Implementation Auditor | 修复真实性 / 工程问题并重跑受污染阶段 |
-| M REAL Mechanism Only | Method Architect + Research Planner | 保留已测scope机制证据，报告真实强度未支持；后续资源决定与原结果分开 |
+| M REAL Mechanism Only | Method Architect + Research Planner | 保留已测scope机制证据，报告真实强度未支持；新路线按第39节推进 |
+| N Guardrail Not Satisfied | Method Architect + Research Scout | 记录退化维度及已有机制证据，检索并验证针对退化原因的新候选 |
 
 ---
 
@@ -3038,7 +3132,7 @@ F7 null。
 必要时新建 research version。
 ```
 
-**不得修改本 02/03 来“救结果”。**
+**不得改写已用于产生结果的02/03快照来救该结果。** 保持01原语的实质新路线由第39.4–39.7节进入新版本，不占用旧版成功名义。当前尚未开始实验的文档修订不构成事后救结果。
 
 ## 39.2 Statistical insufficiency
 
@@ -3079,7 +3173,75 @@ M4 tap 实际取错层。
 从受污染 stage 前重新运行。
 ```
 
-工程修复不得改变算法语义、threshold、route order 或 comparator。
+工程修复不得改变算法语义、threshold、route order或comparator；此类变化属于新方法/协议版本，不能将科学失败改称工程错误。测试已暴露时，重跑必须满足第39.7节的独立性要求。
+
+
+## 39.4 跨版本失败账本
+
+每次run、候选开发/qualification失败、无效执行、资源中断及终局不确定都保存原始记录，并向项目共享的 `research/ledger/events.jsonl` 追加事件。账本目录由首次实际任务创建并纳入版本管理；目前没有研究run，不虚构失败条目。大型日志/checkpoint保存在artifact root，账本保存可解析引用及hash，并按项目备份安排保全。`research/routes/index.json`仅为从账本可重建的路线索引，不能替代原记录。
+
+事件必须包含：
+
+```json
+{
+  "event_id": "...",
+  "timestamp_utc": "...",
+  "event_type": "failure|interrupted|inapplicable|diagnosis_update|retry|closure",
+  "parent_event_ids": [],
+  "research_version": "...",
+  "stage_scope": "...",
+  "route_fingerprint": "...",
+  "method_semantics_ref": "...",
+  "run_manifest_ref": "...",
+  "category": "scientific|statistical|engineering_authenticity",
+  "verdict": null,
+  "facts_and_artifact_refs": [],
+  "applicability_conditions": "...",
+  "affected_evidence_refs": [],
+  "diagnosis_hypothesis": "...",
+  "diagnosis_evidence_refs": [],
+  "unresolved_questions": [],
+  "dedup_matches": [],
+  "material_change_and_retry_basis": "...",
+  "literature_record_ref": null,
+  "experiment_plan_ref": null,
+  "data_exposure_record_ref": "...",
+  "budget_record_ref": "...",
+  "owner": "..."
+}
+```
+
+已有run manifest提供代码/config/模型/数据/seed/环境身份，不重复存大对象。未运行、结构不适用、缺失数据与无有效科学评价的中断分别记录，verdict保持null并说明原因，不计成科学失败。观察事实、冻结verdict与原因假设分开；原因未知可以明确写unknown，不能编造诊断。
+
+事件只追加。更正、重试、否定旧诊断、关闭问题均通过新event引用旧event完成；不得删除失败、覆盖旧分数或只留最好seed。每个新任务、新版本启动及训练前先读全项目路线索引和匹配事件，不能仅阅读当前版本目录。
+
+## 39.5 路线查重与合法再试
+
+`route_fingerprint`来自规范化、可读的机制说明：假设、表示与更新来源、W/R或localizer估计器、损失与teacher拓扑、信息/梯度边界、支持规则及必要对照。规范化规则/version与该说明一并保存。另以exact run identity记录具体代码、参数、模型revision、数据和seed；两种身份不能混用。
+
+去重同时检查fingerprint和语义近似路线，并结合失败适用的scope、数据条件、资源与评价问题。相同机制改名称、换commit、改seed、换目录或换research version不会清除旧失败；配置变化必须解释其因果作用，不能仅凭hash不同声称新路线。相同hash但关键scope/条件变化也不能机械拒绝，要记录适用性判断。
+
+重复执行只有以下可检验依据之一成立才允许：已定位且修复的工程缺陷；新证据直接针对失败原因支持机制/条件变化；预注册独立复现；原协议仍允许且未看正式effect的精度规划。每次再试关联旧failure ID、具体变化、预期可区别观察及停止条件。没有新依据时沿用旧结论并跳过，不花预算再次“试试看”。更换seed、无机制解释的调参、把终局不确定重新开run，都不是独立依据。独立复现保留全部预定seeds与结果，不挑成功run。
+
+## 39.6 失败后主动文献检索与有限实验
+
+失败后负责人持续完成以下动作，而非只提交一句“建议换路线”：
+
+1. **定位失败机制。** 读取失败原始记录，区分科学、统计、工程、资源和数据适用性问题；能直接修复的工程问题先做最小修复核验，未知原因保留备选解释。
+2. **检索一手证据。** 自主检索针对该机制的原论文、作者代码/数据、官方技术资料；同时查已知限制、反例和后续修正。保存检索日期、查询词、已读来源URL/DOI及版本、支持段落/公式定位、适用前提及与本项目的差异。预印本标明状态；仅有摘要/二手转述时标明未核验。论文事实与本项目推断分开，不把引用数量当作成功证据；无相关证据也记录，不伪造替代方案。
+3. **选有限候选。** 每轮至多3条机制上有区别且未被相同条件失败覆盖的候选，按解释力、原语符合性、可判别性、数据合法性及资源成本排序。记录接受/拒绝理由与旧路线的实质差异，不要求预先枚举全部未来路线。
+4. **先登记最小判别实验。** 记录假设、必要对照、允许读取的数据、唯一观察量、继续/拒绝/不确定规则、实现真实性检查、具体run/步数/时间或算力上限及累计已用预算，再实施。优先用工程反例、已有开发证据或小规模pilot区分机制；正式命题仍须完整协议。失败后pilot结果只有探索意义，不直接继承旧formal资格。
+5. **按证据继续或结束本轮。** 在已有资源、数据与执行授权内，自主实现并验证所选路线，写入全部结果和下一动作。候选有支持才进入该版本后续阶段；失败则记账查重，进入剩余候选。没有新的非重复候选、独立数据或可判别实验，或本轮/任务预算到顶时，保存结论并说明具体限制，不无上限试到成功。
+
+首次续行实验前，负责人须在既有授权范围内登记有限、数值化的任务/执行段总预算及每轮子预算；用户已有cap则沿用，未给具体数值则由负责人依据可用资源事前制定保守的有限cap，无需逐路线请示。所有候选、轮次、版本共同计入该总cap，失败、无效及中断执行也计入；每轮记录已用和剩余量。达到上限即结束该执行段并交付，不得通过换轮次、版本、任务标识或自行提高cap继续领取预算。超出原授权的新增投入须用户明确授权；可继续完成不依赖新增运行资源的分析。当前若只授权设计，则推进检索、方案和代码准备，不为纯文档任务虚设实验预算。新一轮还必须有新证据、实质候选或已解决外部条件，不能仅重新编号。记录保存在 `research/literature/`、`research/plans/` 并由账本相互引用。
+
+## 39.7 原协议fallback与新research version
+
+当前版本内仅执行已冻结的路线顺序、触发条件和预算；sticky不确定、test后不切路线等规则继续有效（第17节明确的R-0出口除外）。新的方法族、实质机制配置或研究问题使用新的research_version，先固定旧版Outcome、01/02/03/04快照hash、run/失败账本及数据暴露记录，再登记新版方法/协议与验证计划。Git commit或内容hash能够恢复每版完整快照；本目录可维护当前设计，但旧证据永远引用旧快照。
+
+01原语保持不变时，已授权的失败后研究续行包括自主检索、候选选择、新版本设计、实现及授权预算内验证，不因“新路线/新版本”字样本身重复请示。改变01研究问题/核心算法关系、实际增加超授权资源或付费、取得新受限数据权限、外部发布/不可逆写入等超出原范围的动作，才提交具体待决定项，并继续完成不依赖它的工作。
+
+凡旧test信息用于失败诊断、选路或新版设计，就属于已暴露信息：其对应parent sources不得再充当新版独立确认test，也不能通过换codec/window/seed重新变成未见测试。旧数据可登记为探索/dev用途；新版正式结果使用未参与选择且source-identity隔离的新test，重新完成受影响阶段的freeze/qualification。保留所有尝试与暴露历史；多轮结果分别报告，不跨版本择优拼接，也不声称多轮搜索后的单版本p值具有整个研究程序的统一错误率控制。
 
 ---
 
@@ -3108,6 +3270,8 @@ guardrails；
 secondary M3 native results；
 RB-EER secondary table；
 failure / invalid-run ledger；
+检索记录、候选取舍、重试依据及跨版本关系；
+数据暴露清单与轮次/任务累计预算；
 claim-evidence matrix。
 ```
 
@@ -3115,7 +3279,9 @@ claim-evidence matrix。
 
 ---
 
-# 41. 最终闭合检查
+# 41. 设计覆盖清单
+
+以下项目记录文档中的设计约束，不表示代码、数据或科学验证已完成；实际完成度以所属阶段产物与审查为准。
 
 ```text
 [✓] 01 的 F1–F7 语义未修改；
@@ -3143,15 +3309,15 @@ claim-evidence matrix。
 [✓] Stage 0A 包含 real reference early checkpoint；
 [✓] RB-EER 固定为 secondary，不改变 verdict；
 [✓] failure routing owner 已定义；
-[✓] 所有合法 terminal states 均可达；
-[✓] 不再依赖“失败后再补一个条款”的循环返修模式。
+[✓] 原版本终点、新版本续行与保护性失败分开记录；
+[✓] 失败查重、文献检索、有限新路线与证据隔离有明确合同。
 ```
 
 ---
 
 # 42. 最终冻结声明
 
-项目唯一推进逻辑自此固定为：
+本研究版本内的推进逻辑固定为下列顺序；失败后的项目级续行按第39节进入独立新版本，不改写本版结果：
 
 \[
 \boxed{

@@ -1,12 +1,12 @@
-# 02_方法实现机制设计：CEL / CS-CEL 重构冻结版
+# 02_方法实现机制设计：CEL / CS-CEL
 
-> 上游唯一算法原语：`01_算法原语设计_CEL_CS-CEL.md`  
-> 下游唯一执行协议：`03_项目推进路线_CEL_CS-CEL_REBUILT_FINAL.md`  
-> 文档职责：在不修改 01 冻结算法原语的前提下，完整定义 CEL / CS-CEL 的方法空间、数学合同、强对照、信息边界、独立 correspondence validation、失败路线以及 claim 解释。  
-> 文档层级：**Method Contract / Mathematical Specification / Mechanism Identifiability Contract**  
-> 状态：**REBUILT-FINAL / 01-ALIGNED / CONTROL-CLOSED / METHOD-SPACE-CLOSED**
+> 上游唯一算法原语：`01_算法原语设计_CEL_CS-CEL.md`
+> 配套推进路线：`03_项目推进路线_CEL_CS-CEL_REBUILT_FINAL.md`
+> 文档职责：在不修改 01 冻结算法原语的前提下，完整定义 CEL / CS-CEL 的方法空间、数学合同、强对照、信息边界、独立 correspondence validation、失败路线以及 claim 解释。
+> 文档层级：**Method Contract / Mathematical Specification / Mechanism Identifiability Contract**
+> 状态：**方法实现基线 / 可随研究修订**
 
-> 修订：2026-10-03，实施前修订 v1.2。保留01原语，明确监督权重与有效batch归约；主指标、网格实例和失败后的新版本研究流程由03落实。实际运行就绪状态以数据、配置和阶段记录为准。
+> 修订：2026-10-03，v1.3。保留01原语和现有数学定义。优先推进方法机制；治理、可复现、防篡改及协作信息仅记录，不作为实现、运行或继续研究的准入条件。本文的固定W/R、backbone冻结与stop-gradient指真实计算语义，不要求建立文档锁定系统。
 
 ---
 
@@ -71,10 +71,10 @@ sample size；
 统计检验与 power；
 seed；
 search budget；
-seal / lock；
+运行条件与辅助记录；
 Colab / GPU 执行；
 artifact；
-合法项目终点。
+结果解释与失败后的继续研究。
 ```
 
 ## 0.4 本次重构的四条方法学原则
@@ -83,7 +83,7 @@ artifact；
 
 1. **单变量原则**：formal comparator 与 M5 只允许在待检验机制维度上发生必要差异；
 2. **同信息预算原则**：M2 / M3′ / M4 / M5 使用相同 source supervision、相同 paired data、相同 operational W/R 信息预算；
-3. **事前唯一化原则**：会显著影响 F4/F5/F6 方向的对象必须在 formal test 前唯一冻结；
+3. **比较可解释原则**：同一次比较采用明确的对象和相同评价口径；看过结果后可继续探索，但不能把调整后的比较冒充原先独立确认；
 4. **解释分解原则**：当一个 formal effect 可能由不同机制来源产生时，必须同时报告其机制分解，不得把总效应自动解释为单一机制。
 
 ---
@@ -340,7 +340,7 @@ F3\ \text{correspondence fidelity}.
 }
 \]
 
-F3 未通过时不得解释 CS informative gate 的科学含义。
+F3未支持时，不将该gate称为已验证的真实对应适用性；仍可开发和计算，并按构造例或已测误差范围解释观察。
 
 ## A4 — Admissible uncertainty scope
 
@@ -636,7 +636,7 @@ pre-branch tensor 禁止作为 formal M4 tap；
 不得为 M4 额外增加 projector、adapter 或只为对照服务的 fusion layer。
 ```
 
-03 只负责记录该 tensor 的 exact module path / shape hash，不得重新解释 tap 语义。
+03给出具体实例；实现时核对所取tensor的模块位置、shape和实际物理时间网格。路径及shape可随运行记下，hash不是条件。
 
 ---
 
@@ -652,7 +652,7 @@ formal operational family：
 }
 \]
 
-唯一 route order：
+默认起步顺序（可按第18节调整）：
 
 \[
 \boxed{W\text{-A}\rightarrow W\text{-B}\rightarrow W\text{-C}\rightarrow W\text{-D}.}
@@ -704,7 +704,7 @@ W-E 永远不得升级为 operational rescue route。
 
 # 8. Reliability 方法族
 
-唯一顺序：
+默认起步顺序（可按第18节调整）：
 
 \[
 \boxed{R\text{-A}\rightarrow R\text{-B}\rightarrow R\text{-C}\rightarrow R\text{-0}.}
@@ -726,17 +726,17 @@ U_\psi(x,x',\hat W)\rightarrow\hat R.
 
 监督仅允许来自 synthetic known correspondence error、independent reference error、correspondence-only data。
 
-formal CEL / CS training 前必须冻结。
+在当前CEL/CS训练中固定其参数，不接收detector梯度；这是实际计算关系，不要求lock或hash。
 
 ## 8.4 R-0 — Support-Only Binary Reliability
 
-只有 independent dense evidence 证明全部 nonzero support 满足 full-support fidelity 后，才允许：
+二值support基线可直接实现为：
 
 \[
 \hat R_{p,i}=\mathbf1[\sum_j\hat W_{p,ij}>0].
 \]
 
-Sparse-only evidence 不足以资格化 R-0。
+要将它解释为已验证的R-0，需要independent dense evidence支持full-support fidelity（判据见03）。仅有sparse evidence或尚未验证时仍可探索该基线，但不声称其可靠性已成立。
 
 ---
 
@@ -799,7 +799,7 @@ d_Y(a,b;\mathcal J)
 
 # 10. Independent Correspondence Validation 接口
 
-任何 operational W/R 在进入 formal CEL 前必须经过 independent reference track。
+要声称operational W/R可恢复，需要下述独立reference证据。W/R、CEL及CS的实现和开发实验可以先行或并行；尚无reference时明确对应可靠性未验证，不把自身输出当成真值。
 
 允许：
 
@@ -890,7 +890,7 @@ partial-fake boundary-crossing。
 该分层遵循以下原则：
 
 1. 分层标签只在 W/R 完全冻结后用于 evaluation；
-2. 每个主张 scope 内的必要 strata 都必须满足 absolute W-fidelity floor，具体阈值由 03 冻结；
+2. 每个主张 scope 内的必要 strata 都必须满足 absolute W-fidelity floor，具体评价阈值见03；
 3. strata 之间误差差异本身只作为 diagnostic，不自动等价于“correspondence 读取了 authenticity”；
 4. 若差异显著，必须额外报告 matched acoustic-difficulty analysis；
 5. 未通过某一必要 stratum 的 absolute fidelity 时，只能缩小 F3 scope，不得把其它 strata 的结果拼接为全局 F3。
@@ -1216,11 +1216,11 @@ Stage P resource screen；
 
 ## 13.2 U-OP — Operational-error-aligned analysis
 
-只有 F3 后才定义。其误差来源必须来自：
+有独立参考误差后即可分析，不需要先得到F3 SUPPORTED。其误差来源为：
 
 ```text
-corr-test 上实测 W_hat vs independent reference 的 row / pair error；
-或基于该实测误差分布预注册生成的 perturbation replay。
+有独立reference的数据上实测W_hat的row / pair error，说明开发或独立评价用途；
+或基于该实测误差分布生成的perturbation replay。
 ```
 
 允许：
@@ -1229,7 +1229,7 @@ corr-test 上实测 W_hat vs independent reference 的 row / pair error；
 2. 从实测 error profile 采样 admissible perturbation 施加到 locked W；
 3. 对比 U-REF 与 U-OP 的趋势一致性。
 
-U-OP 固定为 secondary analysis，除非在 formal test 解封前由 03 预注册为独立 secondary family；它永远不得事后升级为 F5 主 verdict。
+U-OP是secondary analysis；可用于诊断和提出新假设，不能代替M5与M3′的F5主比较。
 
 ---
 
@@ -1261,7 +1261,7 @@ O5 对应 M5；
 \boxed{\text{Stage P Screen}\not\Rightarrow F4/F5/F6.}
 \]
 
-Stage P 不得用于选择 formal W/R route、改变 feature tap、改变 M3′ 定义、改变 formal threshold。
+Stage P的观察可以指导后续路线、实现和参数选择；记录实际改变及探索性质。改变tap或对照定义后说明新比较回答的问题，不把它自动算作原F5/F6得到支持。
 
 ---
 
@@ -1304,13 +1304,13 @@ negative set：
 
 若为空，该 pair 可参与 CEL，但不可参与 CS。
 
-上述 \(\mathcal N_p\) 是抽象admissible集合。实际训练和评价使用预注册、有限、去重后的bank
+上述 \(\mathcal N_p\) 是抽象admissible集合。实际训练和评价使用有限、去重后的bank
 
 \[
 \boxed{\mathcal B_p=\{W_{p,1}^-,\ldots,W_{p,K_p}^-\}\subseteq\mathcal N_p(\delta_W).}
 \]
 
-generator family、参数、候选数上限、确定性seed规则、去重与合法性检查均在读取该partition的Y前冻结。train/dev保存实际bank hash；test只在相应数据解封后按锁定生成器实例化，先保存bank hash再读取test Y。不得按标签或detector loss补采、删选bank；训练可在冻结bank内按第17节取hardest negative，但不更新bank。
+generator family、参数、候选数、seed与合法性规则不由当前pair的Y或detector输出决定。先以label/output-blind路径构造bank，再由gate读取Y；不得按标签或detector loss补采、删选bank。训练可在同一固定bank内按第17节取hardest negative，但不更新bank。普通配置或函数参数即可表达这些真实依赖；bank hash、seal或lock仅可选记录。
 
 第16–17节的可实现最小值均取自 \(\mathcal B_p\)。空bank使CS项不适用，CEL仍可适用。F7结论限定于登记的有限候选族和scope：一般有 \(\min_{\mathcal B_p}\ge\inf_{\mathcal N_p}\)，bank上通过informative gate不能推出对所有admissible alternatives均可辨识。01的抽象原语保留，该bank是本次方法实例的操作性范围。
 
@@ -1322,7 +1322,7 @@ negative route order：
 
 N-A 为 structured path perturbation；N-B 为 distribution-matched negatives；N-C 为 learned label-blind generator。
 
-formal F7 后不得重新选择 negative family。
+F7之后可继续探索其它negative family，保留原结果并说明新候选及比较条件；新bank结果不改写旧bank的结论。
 
 ---
 
@@ -1330,15 +1330,16 @@ formal F7 后不得重新选择 negative family。
 
 只有 \(\mathcal I_p^+\neq\varnothing\) 且 \(\mathcal B_p\neq\varnothing\) 时定义。
 
-执行顺序必须为：
+计算依赖为：
 
 ```text
-1. W/R 完全冻结；
-2. negative bank 完全冻结；
-3. F3 已在对应 scope 支持；
-4. 之后才允许读取 Y_x；
-5. 计算 informative gate。
+1. 按label/output-blind路径取得W/R；
+2. 按第15节取得negative bank；
+3. gate读取Y_x并计算下式；
+4. gate或detector loss不反向影响W/R及bank。
 ```
+
+F3不是开发或启用gate的前置条件。未验证operational correspondence时，gate仍可计算，但其实际语义及CS效果只能按已知数据和对应误差范围解释；oracle构造不等价于真实场景验证。
 
 定义：
 
@@ -1424,55 +1425,17 @@ formal CS-CEL：
 
 formal source topology 仍唯一为 G-A。
 
-F7比较的CEL控制与CS-CEL必须从同一seed的同一M5 checkpoint出发，使用相同追加训练数据、采样次序、optimizer、共享超参数及optimizer更新步数。CEL控制只优化 \(\mathcal L_{loc}+\lambda_{CEL}\mathcal L_{CEL}^{sg}\)，CS分支增加上述selectivity项；CS参数的dev搜索范围与预算由03事前固定。所谓“冻结M5”指冻结起点身份、方法配置及W/R，不是用未继续训练的旧checkpoint对比额外训练后的CS模型。
+F7比较的CEL控制与CS-CEL必须从同一seed的同一M5 checkpoint出发，使用相同追加训练数据、采样次序、optimizer、共享超参数及optimizer更新步数。CEL控制只优化 \(\mathcal L_{loc}+\lambda_{CEL}\mathcal L_{CEL}^{sg}\)，CS分支增加上述selectivity项；CS参数可在dev上探索，说明搜索范围和实际投入。所谓“冻结M5”指冻结起点身份、方法配置及W/R，不是用未继续训练的旧checkpoint对比额外训练后的CS模型。
 
 ---
 
-# 18. Route Order、Exhaustion 与冻结语义
+# 18. 默认候选顺序与方法扩展
 
-本节及第21、23节的路线封闭和冻结要求作用于对应method/protocol/evidence版本。当前版本失败按03判决；保持01原语的后续新路线按03第39节主动检索、查重、建立独立版本并验证，不能作为旧版formal rescue，也不受旧版候选名称数量的永久限制。
+默认先尝试实现成本较低且信息充分的候选：localizer L-A→L-B→L-C，correspondence W-A→W-B→W-C→W-D，每个W配R-A→R-B→R-C→R-0，negative N-A→N-B→N-C。该顺序是起步建议，可以依据文献、数据与失败原因调整，不限制候选数量，不采用first-qualified或sticky不确定性阻断研究。
 
-## 18.1 Localizer
+M5及主CS实例采用G-A。G-B/G-C可探索，但它们改变teacher梯度关系，应作为不同实例比较；不能用其结果替代G-A的原结论。W-E是参考/oracle，不因operational方法失败就变成operational估计器。R-0的适用解释仍见第8节和03。
 
-\[
-\boxed{L\text{-A}\rightarrow L\text{-B}\rightarrow L\text{-C}.}
-\]
-
-first-qualified wins。
-
-## 18.2 Correspondence
-
-\[
-\boxed{W\text{-A}\rightarrow W\text{-B}\rightarrow W\text{-C}\rightarrow W\text{-D}.}
-\]
-
-每个 W 内：
-
-\[
-\boxed{R\text{-A}\rightarrow R\text{-B}\rightarrow R\text{-C}\rightarrow R\text{-0}.}
-\]
-
-first-qualified W/R wins。
-
-W-E 不参与 fallback。
-
-## 18.3 CEL topology
-
-formal：
-
-\[
-\boxed{G\text{-A only}.}
-\]
-
-G-B / G-C 不能 rescue。
-
-## 18.4 CS
-
-\[
-\boxed{N\text{-A}\rightarrow N\text{-B}\rightarrow N\text{-C}.}
-\]
-
-N-route 全部无法构造合法 negative bank 时，只能形成 F7 insufficient-negative evidence，不得新增 N-D。
+现有N族无法产生合法bank时，当前F7缺少可评价negative，不否定已有CEL结果。可检索并实现新的label/output-blind生成方式，无需先建立独立研究版本、锁文件或审批流程。记录旧失败、新候选的实质差异和必要对照即可。
 
 ---
 
@@ -1526,7 +1489,7 @@ U-REF Stage P perturbation。
 
 | 条件 | 唯一允许解释 |
 |---|---|
-| F1–F3 supported | operational premise 可进入 mechanism validation |
+| F1–F3 supported | 同scope内operational前提有证据，增强机制比较的解释 |
 | F4 supported | sample-conditioned transport necessity 有证据；必须附 coverage/common-support 分解 |
 | F5 supported | paired prediction transport 超出 matched transported-label supervision |
 | F6 supported | output-space action 超出 same-W feature action |
@@ -1565,11 +1528,10 @@ Strong Real CEL 必须满足：
 W/R 读取 authenticity labels / Y / detector outputs；
 W_ref 代替 formal operational W；
 detector loss 更新 W/R；
-formal 失败后新增 W/R/G/N route；
-formal 失败后更换 M4 canonical tap；
-formal 失败后把 M3 native 替代 M3′ 作为 F5 comparator；
+把改变W/R/G/N、tap或对照后的新比较写成原比较的独立成功；
+用M3 native替代M3′的结果宣称F5成立；
 Stage P 结果替代 F4/F5/F6；
-Stage P 结果用于选择有利 formal method definition；
+隐去探索选择过程并将相同数据上的调参结果称为独立验证；
 用 CTRL 的 F4–F6 与 REAL 的 F1–F3 拼接 Strong Real CEL；
 把 authenticity-stratified error difference 自动解释为 label leakage；
 把 oracle-centered U-REF 当作 operational error distribution；
@@ -1578,81 +1540,16 @@ Stage P 结果用于选择有利 formal method definition；
 
 ---
 
-# 22. 与 03 的唯一接口
+# 22. 与03的实现接口
 
-03 必须从本文直接引用，而不得重新定义：
+02给出M2/M3′/M4/M5/M6、oracle screen、canonical M4 tap、F4分解、U-REF/U-OP及CS目标的计算含义；03给出起步配置、指标计算、统计解释和工作建议。实现以实际shape、时间坐标、信息来源、梯度和损失为依据。
 
-```text
-M2 / M3′ / M3 / M4 / M5 / M6；
-O2 / O3′ / O4 / O5；
-canonical M4 tap 语义；
-F4 decomposition sets；
-U-REF / U-OP 身份；
-W/R/N route order；
-CS informative gate；
-object status。
-```
-
-03 只负责：
-
-```text
-exact module path；
-threshold；
-minimum；
-power；
-partition；
-lock；
-state transition；
-execution artifact；
-合法项目终点。
-```
-
-任何实现若引入新的 loss、route、state 或 verdict，而在 01/02/03 中无唯一 owner，则：
-
-\[
-\boxed{\text{INVALID IMPLEMENTATION}.}
-\]
+新loss、路线或状态可随研究需要增加，说明它解决的问题、与现有原语的关系及对照差异。文档尚未整理、对象尚未编号或缺少hash，不构成INVALID。若改动实际改变了研究问题或核心算法关系，明确该差异，不继续沿用不适用的CEL/CS结论。
 
 ---
 
-# 23. 最终冻结声明
+# 23. 当前覆盖范围与继续推进
 
-本文已从整体结构上闭合：
+本文已描述基础监督、M3′与M4必要对照、F4支持区域分解、时间网格和confidence语义、独立对应误差、CS的有限negative bank、informative gate与匹配追加训练目标。这些足以组织首轮实现和方法实验，不表示实验已经支持CEL或CS。
 
-```text
-基础 supervision；
-M0–M6；
-formal M3′ single-variable control；
-M4 canonical pre-logit tap；
-F4 coverage/common-support decomposition；
-Localizer / W / R / N route；
-Grid Adapter；
-RN0 confidence assumption；
-W-C physical-time assumption；
-Independent W/R validation；
-authenticity-conditioned fidelity；
-U-REF / U-OP uncertainty semantics；
-CS informative gate 的 F3 dependency；
-CS objective；
-object status；
-claim interpretation。
-```
-
-因此本文件自此冻结为：
-
-\[
-\boxed{
-\textbf{
-02 METHOD CONTRACT:
-REBUILT-FINAL
-/
-01-ALIGNED
-/
-CONTROL-CLOSED
-/
-METHOD-SPACE-CLOSED
-}
-}
-\]
-
-冻结后，普通实验失败、某 route 表现差、某工程细节需要调整，均不得反向修改本文；只能按照 03 的 frozen state machine 输出 verdict、claim downgrade，或启动与当前 evidence 隔离的新研究版本。
+遇到实现缺口、失败或文献新证据，可直接修订方法实例并继续比较，保留旧观察及适用范围。可复现和防篡改资料按需记录，不作为方法推进准则；具体自主执行与轻量记录方式见04。

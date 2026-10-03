@@ -6,7 +6,7 @@
 > 文档层级：**Method Contract / Mathematical Specification / Mechanism Identifiability Contract**
 > 状态：**方法实现基线 / 可随研究修订**
 
-> 修订：2026-10-03，v1.3。保留01原语和现有数学定义。优先推进方法机制；治理、可复现、防篡改及协作信息仅记录，不作为实现、运行或继续研究的准入条件。本文的固定W/R、backbone冻结与stop-gradient指真实计算语义，不要求建立文档锁定系统。
+> 修订：2026-10-03，v1.4。保留01原语及核心损失、网格与梯度语义；本次细化独立对应评价及其证据范围。优先推进方法机制；治理、可复现、防篡改及协作信息仅记录，不作为实现、运行或继续研究的准入条件。本文的固定W/R、backbone冻结与stop-gradient指真实计算语义，不要求建立文档锁定系统。
 
 ---
 
@@ -340,7 +340,7 @@ F3\ \text{correspondence fidelity}.
 }
 \]
 
-F3未支持时，不将该gate称为已验证的真实对应适用性；仍可开发和计算，并按构造例或已测误差范围解释观察。
+F3未支持时，不将该gate称为已验证的真实对应适用性；仍可开发和计算，并按构造例或已测误差范围解释观察。Sparse F3只涉及landmark位置，不能据此把全时间轴CS gate解释为已验证；见第10.2节。
 
 ## A4 — Admissible uncertainty scope
 
@@ -736,7 +736,7 @@ U_\psi(x,x',\hat W)\rightarrow\hat R.
 \hat R_{p,i}=\mathbf1[\sum_j\hat W_{p,ij}>0].
 \]
 
-要将它解释为已验证的R-0，需要independent dense evidence支持full-support fidelity（判据见03）。仅有sparse evidence或尚未验证时仍可探索该基线，但不声称其可靠性已成立。
+要将它解释为已验证的R-0，需要independent dense evidence支持reference已确认matched位置上的fidelity（判据见03）。该Q95检查不证明完整partial-support或拒配能力；reference已确认unmatched和未知位置按第10节分别处理。R-0给每个非零W行权重1，因此只要已确认unmatched位置存在非零W，就发生实际误接受，不能将包含该位置的支持称为可信。仅有sparse evidence或尚未验证时仍可探索该基线，但不声称其可靠性已成立。
 
 ---
 
@@ -799,7 +799,7 @@ d_Y(a,b;\mathcal J)
 
 # 10. Independent Correspondence Validation 接口
 
-要声称operational W/R可恢复，需要下述独立reference证据。W/R、CEL及CS的实现和开发实验可以先行或并行；尚无reference时明确对应可靠性未验证，不把自身输出当成真值。
+要声称operational W/R在某范围可恢复，需要下述独立reference证据，并区分matched fidelity、已确认unmatched的拒配与未观察支持。W/R、CEL及CS的实现和开发实验可以先行或并行；尚无reference时明确对应可靠性未验证，不把自身输出当成真值。
 
 允许：
 
@@ -821,52 +821,65 @@ detector confidence；
 W_hat 自生成 reference。
 ```
 
+## 10.0 Reference的三种观察状态
+
+每个reference测量单元区分：\(\mathcal O^+\)为独立确认存在对应，\(\mathcal O^-\)为独立确认unmatched，\(\mathcal O^?\)为未观察或未知。已确认删除/插入、packet timing或已知构造可提供unmatched证据；仅因W_ref零row、R_ref=0或没有标注，不能把未知自动判成unmatched。O?不进入已验证正确、已知误配或已确认拒配的分母，也不据此外推可信性。
+
+第10.1–10.3节的误差、恢复coverage与reliability首先评价O+。另在O−上分别计算：
+
+\[
+\mathrm{FalseMatch}_{-}=\operatorname{wmean}_{\mathcal O^-}\mathbf1[\textstyle\sum_j\hat W_{ij}>0],
+\quad
+\mathrm{FalseAccept}_{-}=\operatorname{wmean}_{\mathcal O^-}\mathbf1[\textstyle\sum_j\hat W_{ij}>0\ \land\ \hat R_i>0].
+\]
+
+权重按03第17.2.1节在O−这个reference stratum上重建：dense按真实cell时长、sparse按实际landmark；没有O−观察时两者未定义，不记零。R=0可阻断该row的实际transport，但不能抹掉raw W误配。**发现FalseAccept时，已确认unmatched的这些位置不具有可信对应，不能用O+上的F3/R-0通过将其包含进可信作用域。** 可以保留O+已得到的结论，并继续改进支持检测或拒配机制。
+
+例如90个O+ rows全部正确、10个O− rows全部强配且R>0，原有matched误差=0、恢复coverage=1、Q95=0，但O−的FalseMatch=1、FalseAccept=1；若后10行改为R=0，FalseMatch仍为1、FalseAccept为0。这个例子说明matched fidelity与partial-support拒配是两个问题。O−上全零误接受观测或退化bootstrap只说明已测样本，没有证明总体误接受为零或得到可靠上界。
+
+本版F3/R-0已有数值判据只支撑matched-support fidelity；完整partial-support及拒配推广需要另外的任务相关独立证据与适当风险推断。没有这种证据时收窄主张，不补造默认阈值，也不阻止运行、诊断和改进。
+
 ## 10.1 Dense W fidelity
 
-定义 jointly evaluable support：
+reference可观察集合为 \(\mathcal I_p^{ref}=\{i:R_{p,i}^{ref}>0,\sum_jW_{p,ij}^{ref}>0,\omega_i>0\}\)，共同可评价集合为
 
 \[
-\mathcal I_p^{joint}
-=
-\left\{i:R_{p,i}^{ref}>0,\ \sum_jW_{p,ij}^{ref}>0,\ \sum_j\hat W_{p,ij}>0\right\}.
+\mathcal I_p^{joint}=\{i\in\mathcal I_p^{ref}:\sum_j\hat W_{p,ij}>0\},
+\qquad e_{p,i}=d_W^{row}(\hat W_{p,i,:},W_{p,i,:}^{ref}).
 \]
 
-定义：
+逐pair平均误差与恢复coverage分别为
 
 \[
-\boxed{
-E_W^{ref}(p)
-=
-\frac{\sum_{i\in\mathcal I_p^{joint}}R_{p,i}^{ref}d_W^{row}(\hat W_{p,i,:},W_{p,i,:}^{ref})}
-{\sum_{i\in\mathcal I_p^{joint}}R_{p,i}^{ref}}.
-}
+\boxed{E_W^{ref}(p)=\frac{\sum_{i\in\mathcal I_p^{joint}}\omega_i e_{p,i}}{\sum_{i\in\mathcal I_p^{joint}}\omega_i}},\qquad
+\boxed{\mathrm{Cov}_W(p)=\frac{\sum_{i\in\mathcal I_p^{joint}}\omega_i}{\sum_{i\in\mathcal I_p^{ref}}\omega_i}}.
 \]
 
-coverage：
+\(\omega_i\)是target cell真实时长。F3把reference的正支持当作可观察掩码，不再用连续 \(R^{ref}\) 值或预测 \(\hat R\) 降权困难row；reference质量及其未观察部分另报。reference支持非空但joint为空时，coverage=0、误差未定义。reference本身为空时，两者均未定义，保留reference缺失信息。
+
+F3的P50/P90/Q95使用**逐row误差分布**，不是 \(E_W^{ref}(p)\) 的分位数；source/family/realization及row时长权重、CI按03第17.2.1节。逐pair均值仅用于诊断和U-OP等明确采用pair mean的分析。
+
+## 10.2 Sparse W fidelity：只验证实际观察的landmarks
+
+对independent landmark \((t_{s,k}^{ref},t_{t,k}^{ref})\)，取包含 \(t_{t,k}^{ref}\) 的半开target cell \(i(k)\)；恰在音频终点的landmark归最后真实cell。同一row多个不同landmark仍各代表一个独立测量位置，但不会增加独立source数。测量不确定度需包括将cell对应用于该点的网格量化误差；未知的cell内部时间变化不能默认为零。
+
+令 \(q_{p,k}=\operatorname{RN}_0(\hat W_{p,i(k),:})\)。非零row上同时计算：
 
 \[
-\boxed{
-\mathrm{Cov}_W(p)
-=
-\frac{|\mathcal I_p^{joint}|}{|\mathcal I_p^{ref}|}.
-}
-\]
-
-禁止使用 \(\hat R\) mask correctness error。
-
-## 10.2 Sparse W fidelity
-
-对 independent landmarks \((t_{s,k}^{ref},t_{t,k}^{ref})\)，若对应 operational row 非零，则：
-
-\[
-\hat t_{s,k}=\sum_j\hat W_{p,i(k),j}t_{s,j},
+\hat t_{s,k}=\sum_j q_{p,k,j}t_{s,j},\qquad
+ e^{center}_{p,k}=|\hat t_{s,k}-t_{s,k}^{ref}|,
 \]
 
 \[
-\boxed{e_{p,k}^{sparse}=|\hat t_{s,k}-t_{s,k}^{ref}|.}
+\boxed{e^{sparse}_{p,k}=W_1^{(t)}(q_{p,k},\delta_{t_{s,k}^{ref}})
+=\sum_j q_{p,k,j}|t_{s,j}-t_{s,k}^{ref}|.}
 \]
 
-zero row 记为 unrecovered，不得记为 error 0。
+**Sparse F3的主误差为 \(e^{sparse}\)**，P50/P90与reliability均使用它；重心误差仅诊断。另报分布扩散 \(s_{p,k}=\sum_jq_{p,k,j}|t_{s,j}-\hat t_{s,k}|\) 与远端质量 \(m_{p,k}(\tau)=\sum_jq_{p,k,j}\mathbf1[|t_{s,j}-t_{s,k}^{ref}|>\tau]\)，\(\tau\)采用该scope的F3 P90误差阈值。它们用于定位误差来源，不另设开发准入。zero row记为未恢复、进入coverage分母，不记error=0。
+
+数值例：source中心为[0,100,200] ms，reference点为100 ms，而 \(q=[.5,0,.5]\)。重心误差为0，但分布误差与扩散均为100 ms；对 \(Y=[1,0,1]\)，该row传输为1，正确中点标签为0。重心对齐不能证明软W传输正确。即使分布误差小，对不连续的occupancy也没有无条件误差保证，F2及定位比较仍各自需要证据。
+
+Sparse coverage只表示reference landmarks中恢复的比例。不可用landmark间距给它们赋予整段时长、不可用插值生成的伪reference rows增加F3证据；时间跨度达到60%也不等于该区间已被密集验证。Sparse支持最多说明这些landmark位置的对应分布误差及R排序，不能证明未观察时间段的W、occupancy或CS gate可靠，不能单独支撑整条真实音频时间轴的Strong Real CEL/CS-CEL。若只提出landmark局部主张，其余F项也应在同样可观察支持上有实际证据；不能把全段F4–F7结果直接与局部F3拼接。需要更广scope时可补独立dense/reference或有实测支持的额外假设，研究开发不必等待它们。
 
 ## 10.3 Reliability calibration
 
@@ -875,6 +888,8 @@ zero row 记为 unrecovered，不得记为 error 0。
 \[
 \boxed{\hat R\uparrow\Rightarrow\text{independent correspondence error}\downarrow.}
 \]
+
+使用与F3误差完全相同的可观察对象、误差定义和条件权重；dense与sparse不混池。weighted Spearman、最高四分之一权重的gain及source-bootstrap按03第17.2.1节实现。R不能反过来筛选其自身正确性评价样本。
 
 ## 10.4 Authenticity-conditioned fidelity
 
@@ -1120,8 +1135,10 @@ extra projector；
 formal multi-layer ensemble；
 feature-specific W；
 pre-branch tap；
-formal result 后更换 feature tap。
+将换tap后的新比较写成原canonical M4比较已经成立。
 ```
+
+可以根据失败更换tap或结构继续探索，说明新比较与canonical M4的差别；旧F6结论保留其原比较对象。
 
 F6：
 
@@ -1427,6 +1444,17 @@ formal source topology 仍唯一为 G-A。
 
 F7比较的CEL控制与CS-CEL必须从同一seed的同一M5 checkpoint出发，使用相同追加训练数据、采样次序、optimizer、共享超参数及optimizer更新步数。CEL控制只优化 \(\mathcal L_{loc}+\lambda_{CEL}\mathcal L_{CEL}^{sg}\)，CS分支增加上述selectivity项；CS参数可在dev上探索，说明搜索范围和实际投入。所谓“冻结M5”指冻结起点身份、方法配置及W/R，不是用未继续训练的旧checkpoint对比额外训练后的CS模型。
 
+
+## 17.1 G-A的退化诊断与续行
+
+informative gate由Y定义，保证的是该bank能区分标签传输；它不保证当前teacher预测已有可区分信息，也不保证selectivity梯度非零。若source teacher在有效支持上恒为c，所有同支持row-stochastic W都有 \(W\operatorname{sg}(P(x))=c\mathbf1\)。于是 \(D^+=D^-\)，\(\mathcal L_{sel}=m\)；由于两项对target输出的导数相同，selectivity梯度相消，source分支又已stop-gradient。
+
+例如beta=1、source=[.3,.3]、target=[.2,.7]，positive取identity、negative交换两列且R=[1,1]：\(D^+=D^-=.0425\)。任意正margin（如.01）仍给target的selectivity梯度[0,0]，source没有该项梯度。该例只检查代数，不把交换列当作真实单调negative生成器。非恒定但在bank作用下不变的teacher也有同类问题。因此“margin未满足”与“训练能离开退化”是两个问题；F7判据不包含收敛保证。
+
+首轮CS调试可同时观察teacher的时序方差、\(\|\hat W P_{src}-W^-P_{src}\|\)、D+/D−、hinge激活比例，以及selectivity对target输出/可训练head的梯度范数；同时检查loc/CEL梯度，避免把总梯度非零误认成selectivity有效。先用恒定例验证相消，再用有时间变化且bank确实改变teacher传输的构造例验证可出现非零梯度。构造例的gate也单独按Y计算。
+
+退化时先检查localizer是否从source监督学到时间变化、bank是否在当前支持上有效、teacher是否误detach了target。可增加相同起点两侧都接受的监督/CEL学习、改变localizer实例或做新的诊断，再重新计算新起点的CS dev尺度；保留旧失败。不因当前模型无信息反向用Y或detector输出重造bank。G-B/G-C可作为改变梯度关系的新实例研究，但其结果不代替G-A。仍然没有有效梯度时，当前证据仅支持“该实例无法提供selectivity学习信号”，继续按第18节或03第39节检索与换路，不声称提高margin可以解决问题。
+
 ---
 
 # 18. 默认候选顺序与方法扩展
@@ -1498,7 +1526,8 @@ U-REF Stage P perturbation。
 | F5 practical-null | 不再主张 prediction transport 的独立必要性 |
 | F6 practical-null | 不再主张 output-space action 的独立必要性 |
 | F4 practical-null | 不再主张 sample-conditioned transport necessity |
-| F7 practical-null / inconclusive | 删除 strong CS claim，保留 CEL supported scope |
+| F7 practical-null / inconclusive | 不主张strong CS，保留各primary效果及CEL supported scope |
+| F7 guardrail-failed | 当前CS存在保护性退化，收窄可用CS主张；不将primary效果改写为null，保留原CEL scope |
 
 F5 的正式结论只允许来自：
 

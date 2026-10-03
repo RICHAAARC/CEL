@@ -5,7 +5,7 @@
 > 文档职责：将01/02的方法定义落实为可实现的起步配置、实验问题、指标、统计解释及失败后的自主研究路径。
 > 状态：**方法优先 / 可迭代的研究基线**
 
-> 修订：2026-10-03，v1.3。治理、可复现、防篡改、环境与协作信息全部作为记录，不设运行或继续研究的强制准入。当前尚无研究实验结果；真实数据和可用权重只影响依赖它们的运行，小构造例、损失和模块实现可以先行。
+> 修订：2026-10-03，v1.4。治理、可复现、防篡改、环境与协作信息全部作为记录，不设运行或继续研究的强制准入。当前尚无研究实验结果；真实数据和可用权重只影响依赖它们的运行，小构造例、损失和模块实现可以先行。
 
 ---
 
@@ -82,6 +82,8 @@ SUPPORTED
 INCONCLUSIVE
 PRACTICAL_NULL
 ```
+
+F7的合并结论另可为 `GUARDRAIL_FAILED`，表示保护性指标明确失败，不表示primary效应接近零。Discrimination、Localization与各guardrail仍分别保留实际判决；合并规则见第27.3节。
 
 ## 2.5 Route / W-R candidate verdict
 
@@ -169,6 +171,8 @@ Strong Real CEL 必须：
 \]
 
 若 F4/F5/F6 仅在 CTRL scope 支持，则只能形成 Controlled Mechanism CEL；real-chain 结果最多作为 exploratory transfer。
+
+scope还包括实际reference支持、matched/unmatched状态与评价时间范围。Sparse F3应附“landmark位置”范围；它与同family的全时间轴F4–F7不是相同scope，不能单独拼成整段Strong Real CEL/CS-CEL。Dense结论同样说明reference覆盖及未观察部分，不能将缺失区间当作已证实。现有F3/R-0阈值针对已确认matched支持；若完整真实通信主张还涵盖unmatched区域，需要独立拒配/支持检测证据，不能仅凭matched误差通过形成完整partial-support或Strong Real主张。已确认误接受的位置不纳入可信作用域，未知区域不能默认可信。该区别限制结论范围，不限制后续实现或实验。
 
 ---
 
@@ -447,7 +451,7 @@ corr_precision:
   coverage_ci_halfwidth_max: 0.05
 ```
 
-real dense / sparse thresholds 仍由 reference uncertainty 派生：
+dense采用02第10.1节逐row分布误差，sparse采用第10.2节相对于点reference的分布误差，不能使用重心误差代替。Reference uncertainty包括时钟/标注及point-to-grid误差，并在同一scope、同一参考可观察对象及第17.2.1节层级权重下求U50/U90；未量化的不确定度不填零。real dense / sparse thresholds由reference uncertainty派生：
 
 \[
 T_{50}^{real}=\max(40ms,2U_{50}^{ref}),
@@ -716,6 +720,40 @@ screen_instance:
 
 验收例：N=160000时native长度499、output长度500、有效时长10秒；N=160080时native长度500、output长度501，最后格时长5 ms、中心10002.5 ms，全部501格属于真实支持。两例均检查时间原点、首尾夹持及padding隔离。配置依据：[Microsoft WavLM配置](https://huggingface.co/microsoft/wavlm-base-plus/blob/main/config.json)；运行时可记下实际模型来源与配置，hash可选。
 
+
+
+### 7.19.2 Operational W-B / R-A起步实例
+
+首轮可从无需转录的W-B开始；这是可计算的开发基线，尚无证据表明它在真实通信中够准。若现成W-A输入可用也可选W-A，不必按菜单逐项等待。
+
+1. 使用与localizer相同来源但冻结、eval/no-grad的WavLM特征。对应估计器只在线性插值**不外推**的output cell中心上取特征，source/target网格外端点不借用localizer的夹持扩展。特征L2归一化；范数不大于epsilon_h的点不可匹配。特征可共享缓存，不能读取训练后的head或Y。真实支持外/不可匹配位置最终为零row。
+2. 在有效时间顺序上，设source特征h_j、target特征h'_i，匹配代价 \(c_{ij}=\max(0,\min(2,1-\langle h'_i,h_j\rangle))\)。不可匹配点的c为无穷。以gap代价g=.30做全局单调edit alignment：
+
+\[
+ C_{i,j}=\min\{C_{i-1,j-1}+c_{ij},\ C_{i,j-1}+g,\ C_{i-1,j}+g\},
+ \quad C_{0,j}=jg,\ C_{i,0}=ig.
+\]
+
+   从右下角回溯；完全相同代价优先match、再跳过source、再跳过target。对匹配(i,j)，raw \(A_{ij}=q_i=\exp(-c_{ij}/.20)\)，其它列为0；跳过target则整行0。保留q_i作为raw-mass证据，\(\hat W=\operatorname{RN}_0(A)\)，不会把置信质量在归一化时丢掉。物理网格已是output grid，后续Adapter为identity。算法不读known transform/reference，后者只用于评价；源/目标缺口在这个基线中由skip表达。
+3. 交换source/target用相同规则独立计算反向path。若target i匹配source j，且反向j匹配target i'，循环误差 \(b_i=|t_{t,i'}-t_{t,i}|\)；以秒为单位取 \(\hat R_i=q_i\exp(-b_i/.060)\)。反向无对应或正向零row时R_i=0。这是R-A的相似度、raw mass与双向一致性实例，数值为开发初值；其校准是否有用由独立误差检验，不能仅因公式产出[0,1]就称为可靠。
+4. 先在identity、prefix-crop、interior-delete的小特征/波形构造上检查方向、skip、零row、时间坐标与raw mass；再在corr-dev测row-error、coverage、reliability及耗时。错配重复内容或软时间漂移可促使改用soft/partial alignment、W-A或其它新实例。无需先训练detector，参数可以依据corr-dev调整；修改后的独立性按实际数据使用解释。
+
+该硬路径只是一种单调运输实例。用于下面N-A比较的共同admissibility class定义为：相同target非零row集合，source时间均在可用source中心范围内，非零row为非负归一分布，按target次序的row source-time重心非降；允许合法source skip。W与negative均逐项满足此类。它不宣称涵盖所有真实通信的多对多关系。
+
+### 7.19.3 N-A起步实例与首批落地步骤
+
+对上述W-B的matched source中心s_i，在可用source中心范围[a,b]内使用端点固定warp：
+
+\[
+ f_\alpha(t)=t+\alpha\sin\!\left(\pi\frac{t-a}{b-a}\right),
+ \qquad \alpha\in\{-160,-80,-40,40,80,160\}\ \mathrm{ms}.
+\]
+
+保留满足 \(|\alpha|\pi/(b-a)\le.25\) 的候选，使导数处于[.75,1.25]且单调；b=a时bank为空。将每个f_alpha(s_i)按相邻有效source中心的物理时间线性插值分配到至多两列，端点取自身，原zero rows保持zero，不wrap、不clip、不删困难row。检查上节共同admissibility、same support与02的d_W，首轮取delta_W=40 ms，只保留实际d_W≥40 ms的候选并去重。source/target输入不含Y或detector输出，候选参数也不因gate是否通过而补抽。该简单bank不适用其它W类时可重新选择相容的generator，说明实例差别。
+
+bank取得后才按02第16节使用Y计算gate，首轮delta_Y_op=.05；阈值是开发初值，可依据研究问题修改，但不按当前pair的Y补选negative。空bank、全部gate=0或teacher退化均有可解释的不同原因：前两者诊断候选范围与数据是否提供可区分标签，第三者按02第17.1节检查预测与梯度；不能合并为CEL被证伪。
+
+实际落地顺序是：先实现grid/occupancy/transport与各loss的构造例，再接上述path/R/bank及统计计算；随后盘点或检索能提供真实音频、区间provenance和source身份的数据，以及可用WavLM权重，优先接通一小批train/dev；最后按共同数据与起点比较M2/M3′/M4/M5和CEL/CS。数据/权重的读取、普通下载与兼容处理属于已授权研究中的实际工作；只有遇到具体受限权限或超范围费用才处理该问题，不把待落实字段变成逐项审批。轻量笔记记录实际输入和失败即可。首轮样本量及训练步数可随信息量和资源调整，不等待完整正式评价配置。
 
 ---
 
@@ -1422,6 +1460,38 @@ R\text{-0}.
 D_{\mathrm{corr-qual-A}}.
 \]
 
+### 17.2.1 F3可计算统计对象、权重与重采样
+
+Dense与sparse分别评价，不把两类reference混成一个误差池。先按02第10.0节把独立reference分成O+（已确认matched）、O−（已确认unmatched）与O?（未观察/未知）。下文P50/P90/Q95、恢复coverage和reliability只取O+：dense是02第10.1节真实cell，sparse是第10.2节实际独立landmarks。O−另算FalseMatch与FalseAccept；不能把零reference行或缺少reference等同于已确认unmatched。参考本身缺失/超出测量能力的位置不产生error，但应说明reference对原音频的覆盖与缺失pair数；没有某个必要family/stratum的有效reference时其结果为INCONCLUSIVE，不凭其它family补足。
+
+对有reference可观察支持的parent source u、family f、realization r，令层级基础权重
+
+\[
+ b_{ufr}=\frac1{U F_u R_{uf}},\qquad
+ a_{ufr\ell}=b_{ufr}\frac{v_{ufr\ell}}{\sum_{k\in\mathcal O_{ufr}}v_{ufrk}}.
+\]
+
+其中U为这些独立parent source数，F_u为本scope中该source有reference的family数，R_uf为其有reference的realization数；同一母音频的窗口/重复采集归入该source的realizations，不增加U。\(\mathcal O_{ufr}\)只由reference决定；dense取v=cell真实时长，sparse每个实际landmark取v=1。仅一family时F_u=1；不平衡family的整体统计之外，仍逐family报告，缺失的必要family不算通过。
+
+令 \(c_{ufr\ell}=1\) 表示operational W在该reference位置非零且数值有效。\(c=0\)保留基础权重，**包括整对音频无恢复row的情况**。非有限W是实现失败，不能用删除该pair改善coverage。定义
+
+\[
+ Coverage=\sum a_{ufr\ell}c_{ufr\ell},\qquad
+ \tilde a_{ufr\ell}=\frac{a_{ufr\ell}c_{ufr\ell}}{Coverage}.
+\]
+
+coverage是有reference支持上的恢复率，不代表reference对整段音频的覆盖。Coverage>0时，P50/P90及R-0的Q95均对逐row/landmark误差e使用条件权重 \(\tilde a\) 求加权inverse-CDF分位数：相同值合并，累计归一权重首次达到或超过q的值为Q(q)。禁止先求pair mean/median再取这些分位数，也不按预测R筛样或加权。Coverage=0时误差分位数和reliability未定义，报告该缺失及coverage=0；不能把未恢复当作零误差。是否足以给完整失败判决仍按minimum/precision及可计算的失败项解释。
+
+数值例：每对音频均有100个等时长reference rows，89行误差0、11行170 ms且全部恢复。pair mean为18.7 ms，但F3 P90=170 ms，不能用18.7通过60/100 ms尾部阈值。另一例：两个等权source各一pair，一个完全恢复且误差0，另一个全部未恢复；Coverage=.5，条件P90=0，不能因已恢复部分准确就通过coverage检查。
+
+可靠性使用同一e与 \(\tilde a\)。对任意值z定义加权中秩 \(r_w(z)=\sum_{z'<z}\tilde a_{z'}+\frac12\sum_{z'=z}\tilde a_{z'}\)；\(\rho_R\)是 \(r_w(R)\)、\(r_w(e)\) 的加权Pearson相关，等权时即普通tie-aware Spearman。最高四分之一按**权重质量**而不是点数选择：从R最大值向下累计至.25，边界R并列组按同一比例分配保留质量，使恰好.25，禁止用source编号任意选掉并列点。其误差median采用上述inverse-CDF Q(.5)，top权重单独归一；\(G_R=1-Q_{top,e}(.5)/Q_e(.5)\)。R/e常数、总误差median=0或无恢复支持时按未定义处理，不填零。
+
+CI按第8.9节source membership分层的cluster bootstrap。每次整source有放回抽样，保留其全部families、realizations、rows/landmarks及候选间配对；用source multiplicity乘基础权重并重新归一，再从头计算Coverage、条件权重、误差分位数、加权中秩、top-quarter阈值及gain。不能bootstrap帧/landmark、复用全样本top-quarter列表或对pair均值取CI。必要authenticity stratum先在reference对象上筛选，重新建立该stratum的U/F/R及权重，最低量按含该stratum的独立parent sources计；没有该stratum不能判通过。插值点、rows或多个窗口均不增加独立样本量。
+
+对O−按同样层级重建base权重，分别加权平均W非零指示与W非零且R>0指示，得到02第10.0节的FalseMatch与FalseAccept；整source重采样仍保留该source的O+/O−关联。O?单列未观察范围，不混入分母。没有O−观察时拒配证据缺失，不默认通过；实际误接受的位置不得进入可信支持。全零观测的bootstrap可能给[0,0]，不能将其当作总体零风险保证或有效误接受上界；本版不据此给完整partial-support资格。若以后需要推广拒配主张，按具体任务补独立样本与合适推断，现有matched评价及开发照常继续。
+
+这些分位数用inverse-CDF；**bootstrap统计量的CI端点**仍用第8.9节type-7插值，两者不混用。任何重采样中必要统计量未定义按第8.9节保留原因并判相关项INCONCLUSIVE，不静默重抽。该统计合同服务于可解释结论，开发时可先计算少量样本点估计，不以CI尚未可计算阻止继续研究。
+
 ### W decision
 
 评价：
@@ -1477,7 +1547,7 @@ G_R
 \frac{median(e\mid R\in Q_{top})}{median(e)}.
 \]
 
-使用共同可评价的reference rows / landmarks，不按预测R屏蔽误差。Spearman使用average ranks；top quartile取R排序最高的 \(\lceil n/4\rceil\) 个点，并列按稳定的source/realization/时间索引打破。CI按source utterance cluster bootstrap计算。
+使用第17.2.1节相同reference对象、条件权重、weighted Spearman和最高四分之一权重的gain；CI整source重采样并重算所有非线性步骤。
 
 QUALIFIED 必须满足：
 
@@ -1495,9 +1565,9 @@ L_{95}(G_R)>0.
 
 R-A/B/C的判决顺序：满足以上全部条件为QUALIFIED；否则若 \(L_{95}(\rho_R)>-0.30\) 或 \(U_{95}(G_R)<0.25\)，则REJECTED；其它为INCONCLUSIVE。若R或error为常数、median(error)=0，或有效数据不足，使rho/G未定义，则为INCONCLUSIVE并记录原因，不填零或默认通过。数值阈值均引用第7.10节。
 
-R-0不经过Spearman/gain检验，只表示已验证的二值对应支持。它仅在dense reference下评价同一W的independent row-error Q95：\(U_{95}(Q95)\le\texttt{r0.controlled\_q95\_ms}\)时ELIGIBLE并映射为该W的R=QUALIFIED；\(L_{95}(Q95)\)严格大于阈值时INELIGIBLE并映射为REJECTED；跨越阈值则INCONCLUSIVE。此严格Q95上限也适用于REAL dense，不随REAL的W阈值放宽。sparse-only永远INELIGIBLE，作为结构上不适用的候选跳过，不能冒充一次统计失败。
+R-0不经过Spearman/gain检验；其本节资格仅针对dense reference确认的matched支持，不等于完整partial-support或拒配能力。它仅在O+上评价同一W的independent row-error Q95：\(U_{95}(Q95)\le\texttt{r0.controlled\_q95\_ms}\)时ELIGIBLE并映射为该W的R=QUALIFIED；\(L_{95}(Q95)\)严格大于阈值时INELIGIBLE并映射为REJECTED；跨越阈值则INCONCLUSIVE。此严格Q95上限也适用于REAL dense，不随REAL的W阈值放宽。sparse-only永远INELIGIBLE，作为结构上不适用的候选跳过，不能冒充一次统计失败。R-0在O−上W非零就会实际误接受；Q95通过不能覆盖这些错误位置。O−缺失或O?存在时，不将matched资格外推为全支持可信。
 
-若independent error恒定，或median(error)=0导致gain无定义，可直接检查同一W的R-0；必须dense reference、W整体及全部mandatory strata的minimum/precision/absolute fidelity均合格，且整体与每个mandatory stratum的 \(U_{95}(Q95)\le60\text{ ms}\)。通过时R-0有支持，可记录reason `RANK_UNIDENTIFIABLE_HIGH_FIDELITY`，不将R-A/B/C无定义的值填成通过。仅R恒定而error非退化、数据/precision不足或普通CI跨阈值不能推断高保真；R-0未通过时保留它和原R各自的结果。后续可以改变R继续探索，但独立确认以实际未参与选择的数据为依据。
+若independent error恒定，或median(error)=0导致gain无定义，可直接检查同一W的R-0；必须dense reference、W整体及全部mandatory strata的minimum/precision/absolute fidelity均合格，且整体与每个mandatory stratum的 \(U_{95}(Q95)\le60\text{ ms}\)。通过时R-0在上述O+范围有支持，仍按O−/O?规则限制作用域；可记录reason `RANK_UNIDENTIFIABLE_HIGH_FIDELITY`，不将R-A/B/C无定义的值填成通过。仅R恒定而error非退化、数据/precision不足或普通CI跨阈值不能推断高保真；R-0未通过时保留它和原R各自的结果。后续可以改变R继续探索，但独立确认以实际未参与选择的数据为依据。
 
 候选W/R的QUALIFIED解释同时需要W、R及主张scope内必要strata支持；只确认W不能代替R的证据。W的独立误差不以预测R遮蔽，所以换R不能抹去同一W的错误。失败或INCONCLUSIVE后均可继续尝试其它W/R，逐候选保留其结果，不设置sticky状态或固定顺序准入。
 
@@ -1545,11 +1615,15 @@ W-E始终是reference/oracle，不能替代operational方法的实测支持。
 
 对当前具体W/R实例使用相同decision functions评价。
 
-若 W 与 R 均 QUALIFIED，必要 authenticity strata 均满足 absolute fidelity floor，且 precision gate 通过：
+若 W 与 R 均 QUALIFIED，必要 authenticity strata 均满足 absolute fidelity floor，且precision参考条件满足，则在本次reference已确认matched的O+支持上：
 
 \[
 \boxed{F3[\mathrm{scope}]=SUPPORTED.}
 \]
+
+同时列明O−上的raw误配与实际误接受、O?未观察范围。现有判据未检验拒配总体风险，不能只把同一个family名称写上就扩展到完整partial-support。
+
+Sparse的SUPPORTED明确限定landmark位置，采用分布误差而非重心误差；不能自动覆盖landmark之间、整个区间或全音频。全时间轴CEL/CS机制证据的解释遵循第3节scope规则。
 
 若仅 precision / sample size 不足：
 
@@ -1910,6 +1984,8 @@ OOD 不产生独立 formal verdict。
 
 两分支使用同一seed的M5 checkpoint、\(D_{cs-train}\)、paired sampling次序、optimizer、学习率/weight decay、\(\lambda_{CEL}\)、追加optimizer步数、有效batch及checkpoint选择规则。CEL控制继续优化loc+CEL，CS增加selectivity；g=0的pair仍以相同规则参与两侧基础目标，不能只给CS筛选更容易的数据。detector可按合同继续更新，W/R及negative bank不更新。CS新增参数在cs-dev上探索并说明实际搜索投入，共享配置不为某一侧单独调优。
 
+先按02第17.1节做G-A的teacher传输差异与selectivity梯度诊断。gate=1且hinge>0不保证梯度有效；相消时可继续source监督/CEL、修复localizer或探索其它实例。两侧共享改进后的同一起点，重新计算dev尺度，不用加大margin代替诊断。
+
 第7.17节的margin及selectivity尺度用追加训练前的M5在cs-dev上的固定预测计算，先确定尺度再搜索CS参数，不使用test结果，也不以训练后CS输出定义门槛。开始匹配比较时给两侧相同的追加训练步数、共享optimizer配置和有效batch；可先用小步数调试，配置随运行记录，无需预登记手续。
 
 ## 25.1 N-route exhaustion
@@ -2032,33 +2108,16 @@ U_{95}^{one-sided}(\Delta_7)<\epsilon_{cs}.
 
 ## 27.3 F7 final
 
-只有：
+分别给出第27.1节Discrimination、第27.2节Localization的primary判决，以及第28节三项guardrail的判决；合并状态不覆盖这些原始结果。
 
-```text
-Discrimination SUPPORTED；
-Localization SUPPORTED；
-clean mixed-partial guardrail PASS；
-bona-fide guardrail PASS；
-fully-manipulated guardrail PASS。
-```
+| 已观察条件（按此顺序合并） | F7合并状态 | 含义 |
+|---|---|---|
+| 任一guardrail明确FAIL | GUARDRAIL_FAILED | 当前CS实例出现保护性退化；不把primary效果写成零或低于epsilon |
+| 无guardrail FAIL，至少一个primary component为PRACTICAL_NULL | PRACTICAL_NULL | 对应component有第27.1/27.2节规定的效应上界证据；另一component和不确定guardrail仍单列 |
+| 两个primary components均SUPPORTED，且三个guardrails全部PASS | SUPPORTED | 当前scope和有限bank内CS扩展得到支持 |
+| 其它 | INCONCLUSIVE | 明确尚缺的效果或保护性证据 |
 
-才：
-
-\[
-\boxed{F7=SUPPORTED.}
-\]
-
-任一component PRACTICAL_NULL或三类guardrail中任一FAIL（分别记录PRIMARY_NULL或GUARDRAIL_FAIL，后者不冒称primary的效应上界）：
-
-\[
-\boxed{F7=PRACTICAL_NULL.}
-\]
-
-其它：
-
-\[
-\boxed{F7=INCONCLUSIVE.}
-\]
+每一项先按自己的minimum/precision判断是否可判；数据不足不会自动产生FAIL或NULL。`GUARDRAIL_FAILED`可与已支持的primary效果并存，表示可用性主张受限；既有CEL证据按原scope保留。任何状态都允许继续诊断、改进和新比较，不是停止研究的准入规则。
 
 ---
 
@@ -2164,9 +2223,9 @@ M0是本次比较共同使用、对应seed的source监督localizer checkpoint，
 |---|---|---|
 | 4T | M5三类guardrail PASS | FAIL记Outcome N；INCONCLUSIVE记Outcome K；保留F4–F6效果判定，收窄可用CEL主张，可继续5/6探索或修复 |
 | 5T | M5三类guardrail PASS | FAIL记Outcome N，Stage5合并verdict=INCONCLUSIVE并带GUARDRAIL_FAIL原因；INCONCLUSIVE记K；保留primary结果，不形成Strong Real CEL |
-| 6T | CS三类guardrail PASS | FAIL使F7=PRACTICAL_NULL且reason=GUARDRAIL_FAIL；INCONCLUSIVE使F7=INCONCLUSIVE（若primary已明确NULL则仍NULL）；保留此前成立的CEL |
+| 6T | CS三类guardrail PASS | FAIL使F7=GUARDRAIL_FAILED并记Outcome N；primary状态原样保留。无FAIL时按第27.3节处理NULL与不确定性；保留此前成立的CEL |
 
-最低量/precision不足优先于对应项判定。Stage4若主效果已明确NULL仍记J；若主效果支持而guardrail失败记N，不把保护性失败当作机制效应小于epsilon。Stage5在guardrails PASS后才采用第24节primary/multi-family合并verdict；失败时不以primary上界解释guardrail。Stage6沿用第27.3节“明确NULL/FAIL优先，其余不确定”的组合。Outcome K/N可同时列原因，已成立的其它scope和旧版本证据保留各自身份。
+最低量/precision不足优先于对应项判定。Stage4若主效果已明确NULL仍记J；若主效果支持而guardrail失败记N，不把保护性失败当作机制效应小于epsilon。Stage5在guardrails PASS后才采用第24节primary/multi-family合并verdict；失败时不以primary上界解释guardrail。Stage6按第27.3节区分GUARDRAIL_FAILED与primary PRACTICAL_NULL。Outcome K/N可同时列原因，已成立的其它scope和旧版本证据保留各自身份。
 
 ---
 
@@ -2478,7 +2537,7 @@ Stage4/5的M5及Stage6的CS三类guardrails均PASS。
 ```text
 F1–F6 SUPPORTED；
 Stage4/5的M5三类guardrails均PASS，Stage5合并verdict SUPPORTED；
-F7 PRACTICAL_NULL / INCONCLUSIVE；
+F7 PRACTICAL_NULL / INCONCLUSIVE / GUARDRAIL_FAILED；
 或 NEGATIVE_BANK_UNAVAILABLE。
 ```
 
@@ -2609,7 +2668,7 @@ N-route exhaustion 导致 F7 INCONCLUSIVE。
 
 ## Outcome N — Guardrail Not Satisfied
 
-当前版本Stage4或Stage5的必要guardrail明确FAIL。保留已得到的主效应、scope及失败维度，停止相应可用方法/Strong Real主张；不把该状态冒充PRACTICAL_NULL效应上界。三类guardrail有INCONCLUSIVE而无FAIL时使用K。CS阶段的guardrail失败按F7记录并保留先前合法CEL结论。
+当前版本Stage4、Stage5或Stage6的必要guardrail明确FAIL。保留已得到的主效应、scope及失败维度，收窄相应可用方法/Strong Real主张；不把该状态冒充PRACTICAL_NULL效应上界。Stage6同时记F7=GUARDRAIL_FAILED并保留先前合法CEL结论。三类guardrail有INCONCLUSIVE而无FAIL时使用K；实际primary NULL仍保留其单项证据。
 
 # 38. 失败后工作的组织
 
